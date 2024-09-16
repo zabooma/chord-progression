@@ -19,16 +19,16 @@ function factory ()
 
     function getRelevantChords(region, chord_markers)
         -- Extract items from chord_markers where marker start >= region start and marker start < region start + length
-        local region_start = region:position():beats()
-        local region_end = region_start + region:length():beats()
+        local region_position = region:position():beats()
+        local region_end = region_position + region:length():beats()
         local relevant_chord_markers = {}
 
-        print("Region '" .. region:name() .. "' start time", region_start)
+        print("Region '" .. region:name() .. "' start time", region:start():beats(), " position ", region_position)
         print("Region length", region:length():beats())
 
         for _, marker in ipairs(chord_markers) do
             local marker_start = marker:start():beats()
-            if marker_start >= region_start and marker_start < region_end then
+            if marker_start >= region_position and marker_start < region_end then
                 table.insert(relevant_chord_markers, marker)
             end
         end
@@ -223,19 +223,33 @@ function factory ()
             local min_blending = math.huge  -- Set to a very large number
 
             -- Loop through inversions and octave adjustments to find the best match
+            local all_inversions = {}
             for octave_adjustment = -1, 1 do
                 for inversion = 0, #chord_type_map[chord_type] - 1 do
                     local candidate_notes = get_chord_notes(key, chord_type, 4 + octave_adjustment, inversion)
                     local blending = evaluate_inversion_blending(prev_notes, candidate_notes)
-                    print("Candidate notes, inversion " .. tostring(inversion) .. " octave adjustment " .. tostring(octave_adjustment), print_table(candidate_notes))
-                    if blending <= min_blending and blending ~= 0 then
-                        best_inversion = inversion
-                        best_octave_adjustment = octave_adjustment
-                        min_blending = blending
+                    if blending > 0 then
+                        print("Candidate notes, inversion " .. tostring(inversion) .. " blending " .. blending .. " octave adjustment " .. tostring(octave_adjustment), print_table(candidate_notes))
+                        -- Save this inversion
+                        local inversion_obj = {
+                            inversion = inversion,
+                            blending = blending,
+                            octave_adjustment = octave_adjustment
+                        }
+                        table.insert(all_inversions, inversion_obj)
                     end
                 end
             end
-            print("Choosing inversion " .. tostring(best_inversion) .. " with blending ", min_blending, " and octave adjustment " .. tostring(best_octave_adjustment))
+            table.sort(all_inversions,function(a, b)
+                return a.blending < b.blending
+            end )
+            -- Chose one of the first two inversions
+            local inversion_index = math.random(1, 2)
+            best_inversion = all_inversions[inversion_index].inversion
+            best_octave_adjustment = all_inversions[inversion_index].octave_adjustment
+            min_blending = all_inversions[inversion_index].blending
+
+            print("Chosen is inversion with index " .. inversion_index .. " inversion " .. tostring(best_inversion) .. " with blending ", min_blending, " and octave adjustment " .. tostring(best_octave_adjustment))
             return best_inversion, best_octave_adjustment
         else
             -- Default inversion if no previous chord
@@ -244,17 +258,17 @@ function factory ()
     end
 
     -- Function to optimize chord for playability by limiting notes and hand span
-    function optimize_chord(notes, root_note, max_notes_per_hand, max_hand_span)
+    function optimize_chord(notes, root_note, max_notes_per_hand, max_hand_span, priority_intervals)
         -- Ensure the notes are sorted
         table.sort(notes)
+
+        print("Optimizing chord ", print_table(notes), " for notes per hand ", max_notes_per_hand,
+                " max hand span ", max_hand_span, " priority intervals ", print_table(priority_intervals))
 
         -- Limit the span of notes
         while notes[#notes] - notes[1] > max_hand_span do
             table.remove(notes)
         end
-
-        -- Define priority intervals
-        local priority_intervals = { 0, 3, 4, 10 }
 
         -- Keep track of whether any note was removed in the last pass
         local note_removed = true
@@ -271,11 +285,13 @@ function factory ()
                 end
             end
 
-            -- If no notes were removed, remove the last note (the highest note) to prevent infinite loop
+            -- If no notes were removed we only have the priority notes left, remove a random note to prevent infinite loop
             if not note_removed then
-                table.remove(notes)
+                table.remove(notes, math.random(1, #notes))
             end
         end
+
+        print("Optimized chord ", print_table(notes))
 
         return notes
     end
@@ -319,14 +335,14 @@ function factory ()
     end
 
     -- Function to add a chord at a given marker position
-    function add_chord_to_midi(midiCommand, chord_str, hand_inversion, hand_octave, position, duration, max_notes_per_hand, max_hand_span)
+    function add_chord_to_midi(midiCommand, chord_str, hand_inversion, hand_octave, position, duration, max_notes_per_hand, max_hand_span, priority_intervals)
         local key, chord_type = parse_chord(chord_str)
 
         -- Get chord notes for both hands
         local hand_notes = get_chord_notes(key, chord_type, hand_octave, hand_inversion)
 
         -- Optimize the chord notes for playability
-        hand_notes = optimize_chord(hand_notes, note_map[key], max_notes_per_hand, max_hand_span)
+        hand_notes = optimize_chord(hand_notes, note_map[key], max_notes_per_hand, max_hand_span, priority_intervals)
 
         -- Add MIDI notes to the region
         for _, note in ipairs(hand_notes) do
@@ -390,6 +406,8 @@ function factory ()
         local _max_hand_span = { 13, 13 }
         local _max_notes_per_hand = { 3, 4 }
         local _inversions_per_bar = { 0, 0 } -- One inversion per chord change
+        -- Define priority intervals per hand
+        local _priority_intervals = {{0,5,3},{ 0, 3, 4, 10 }}
 
         local ticks_per_beat = 1920.0
 
@@ -413,8 +431,8 @@ function factory ()
                 local max_notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)
                 local inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)
 
-                local regionStart = midi_region:position():beats()
-                local regionEnd = regionStart + midi_region:length():beats()
+                local region_position = midi_region:position():beats()
+                local region_end = region_position + midi_region:length():beats()
 
                 -- Get signature at the start of the region
                 local tempoMap = Temporal.TempoMap:read()
@@ -449,19 +467,18 @@ function factory ()
                     for i, marker in ipairs(relevantChordMarkers) do
                         -- Add chord marker first
 
-                        local start_time = marker:start():beats() - regionStart
+                        local start_position = marker:start():beats() - region_position
                         local end_time = nil
                         if i < #relevantChordMarkers then
                             -- Use start of the next chord as the end time
                             end_time = relevantChordMarkers[i + 1]:start():beats()
                         else
                             -- Use end of the region as the end time
-                            end_time = regionEnd
+                            end_time = region_end
                         end
-                        local duration = end_time - start_time - regionStart
-                        local chordStr = marker:name():sub(2)
+                        local chord_str = marker:name():sub(2)
 
-                        print("Adding first inversion change point for ", chordStr, " at ", marker:start():beats())
+                        print("Adding first inversion change point for ", chord_str, " at ", marker:start():beats())
                         local first_marker_name = marker:name()
                         local first_marker_time = marker:start():beats()
                         local first_marker = {
@@ -497,7 +514,7 @@ function factory ()
                                     }
 
                                     -- Add the new marker to the inversion_change_markers table
-                                    print("Adding new inversion change point for ", chordStr, " at ", marker_time)
+                                    print("Adding new inversion change point for ", chord_str, " at ", marker_time)
                                     table.insert(inversion_change_markers, new_marker)
                                 end
                                 -- prepare for the next marker
@@ -520,7 +537,7 @@ function factory ()
                     -- Process chord markers in range
                     for i, marker in ipairs(inversion_change_markers) do
 
-                        local start_time = marker.time - regionStart
+                        local start_time = marker.time - region_position
                         local end_time = nil
                         if i < #inversion_change_markers then
                             -- Use start of the next chord as the end time
@@ -528,24 +545,27 @@ function factory ()
                             end_time = inversion_change_markers[i + 1].time
                         else
                             -- Use end of the region as the end time
-                            print("Using region end at ", regionEnd, " for the duration")
-                            end_time = regionEnd
+                            print("Using region end at ", region_end, " for the duration")
+                            end_time = region_end
                         end
-                        local duration = end_time - start_time - regionStart
-                        local chordStr = marker.name:sub(2)
+                        local duration = end_time - start_time - region_position
+                        local chord_str = marker.name:sub(2)
 
                         local inversion, octave_adjustment, octave
 
-                        inversion, octave_adjustment = choose_inversion(chordStr, previous_inversion, previous_chord_str, previous_octave_adjustment)
+                        inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
                         octave = hand_octave[hand] + octave_adjustment
 
                         -- Add chord to MIDI for the current hand
-                        local chord_notes = add_chord_to_midi(midiCommand, chordStr, inversion, octave,
-                                start_time, duration,
+                        -- Note position needs to be adjusted with region::start()
+                        -- (if region start boundary was moved after region was created or extended)
+                        local chord_notes = add_chord_to_midi(midiCommand, chord_str, inversion, octave,
+                                start_time + midi_region:start():beats(), duration,
                                 max_notes_per_hand[hand],
-                                max_hand_span[hand])
+                                max_hand_span[hand],
+                                _priority_intervals[hand])
 
-                        print("Adding chord ", chordStr, " at ", start_time, " with duration ", duration,
+                        print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
                                 " for hand ", hand, " inversion ", inversion, " hand octave ", hand_octave[hand],
                                 " octave adjustment ", octave_adjustment,
                                 " chord_notes ", print_table(chord_notes))
@@ -554,7 +574,7 @@ function factory ()
                         previous_inversion = inversion
                         previous_octave_adjustment = octave_adjustment
                         -- Save current chord string and notes for the next iteration
-                        previous_chord_str = chordStr
+                        previous_chord_str = chord_str
                         previous_chord_notes = chord_notes
 
                     end
