@@ -263,7 +263,7 @@ function factory ()
         table.sort(notes)
 
         print("Optimizing chord ", print_table(notes), " for notes per hand ", max_notes_per_hand,
-                " max hand span ", max_hand_span, " priority intervals ", print_table(priority_intervals))
+                " max hand span ", max_hand_span, " priority intervals ", print_table(priority_intervals), " root note ", root_note)
 
         -- Limit the span of notes
         while notes[#notes] - notes[1] > max_hand_span do
@@ -272,13 +272,24 @@ function factory ()
 
         -- Keep track of whether any note was removed in the last pass
         local note_removed = true
-
+        -- Convert root note to the base octave
+        root_note = root_note % 12
         -- Remove notes based on priority intervals until the number of notes is acceptable
         while #notes > max_notes_per_hand do
             note_removed = false  -- Reset the flag to check if any note is removed
 
+            local interval =  nil
             for i, note in ipairs(notes) do
-                if not contains(priority_intervals, (note - root_note) % 12) then
+                -- Convert current note to the base octave
+                note = note % 12
+                if note < root_note then
+                    interval = (note + 12 - root_note)
+                else
+                    interval = (note - root_note)
+                end
+                print(string.format("Root note %d note %d interval %d", root_note, note, interval))
+                if not contains(priority_intervals, interval) then
+                    print("Removing non_priority note ", note)
                     table.remove(notes, i)
                     note_removed = true  -- Mark that a note was removed
                     break
@@ -287,7 +298,9 @@ function factory ()
 
             -- If no notes were removed we only have the priority notes left, remove a random note to prevent infinite loop
             if not note_removed then
-                table.remove(notes, math.random(1, #notes))
+                local note =  math.random(1, #notes)
+                print("Removing priority note ", notes[note])
+                table.remove(notes, note)
             end
         end
 
@@ -335,7 +348,7 @@ function factory ()
     end
 
     -- Function to add a chord at a given marker position
-    function add_chord_to_midi(midiCommand, chord_str, hand_inversion, hand_octave, position, duration, max_notes_per_hand, max_hand_span, priority_intervals)
+    function add_chord_to_midi(midiCommand, channel, chord_str, hand_inversion, hand_octave, position, duration, max_notes_per_hand, max_hand_span, priority_intervals)
         local key, chord_type = parse_chord(chord_str)
 
         -- Get chord notes for both hands
@@ -346,17 +359,17 @@ function factory ()
 
         -- Add MIDI notes to the region
         for _, note in ipairs(hand_notes) do
-            add_midi_note_to_region(midiCommand, note, 64, position, duration)
+            add_midi_note_to_region(midiCommand, channel, note, 64, position, duration)
         end
 
         return hand_notes
     end
 
-    function add_midi_note_to_region(midiCommand, note_pitch, note_velocity, start_time, duration)
+    function add_midi_note_to_region(midiCommand, channel, note_pitch, note_velocity, start_time, duration)
 
         -- Create a new note and add it to the command
         local new_note = ARDOUR.LuaAPI.new_noteptr(
-                0, -- Channel (0 for default)
+                channel, -- Channel (0 for default)
                 start_time, -- Start time in beats
                 duration, -- Duration in beats
                 note_pitch, -- MIDI note number
@@ -406,8 +419,10 @@ function factory ()
         local _max_hand_span = { 13, 13 }
         local _max_notes_per_hand = { 3, 4 }
         local _inversions_per_bar = { 0, 0 } -- One inversion per chord change
+        local _hand_channel = {0,0} -- Both hands go to the same channel
         -- Define priority intervals per hand
-        local _priority_intervals = {{0,5,3},{ 0, 3, 4, 10 }}
+        --
+        local _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
         local ticks_per_beat = 1920.0
 
@@ -430,6 +445,7 @@ function factory ()
                 local max_hand_span = get_config_values("hand_span", _max_hand_span)
                 local max_notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)
                 local inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)
+                local hand_channel = get_config_values("channel", _hand_channel)
 
                 local region_position = midi_region:position():beats()
                 local region_end = region_position + midi_region:length():beats()
@@ -559,7 +575,7 @@ function factory ()
                         -- Add chord to MIDI for the current hand
                         -- Note position needs to be adjusted with region::start()
                         -- (if region start boundary was moved after region was created or extended)
-                        local chord_notes = add_chord_to_midi(midiCommand, chord_str, inversion, octave,
+                        local chord_notes = add_chord_to_midi(midiCommand, hand_channel[hand], chord_str, inversion, octave,
                                 start_time + midi_region:start():beats(), duration,
                                 max_notes_per_hand[hand],
                                 max_hand_span[hand],
