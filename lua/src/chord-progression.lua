@@ -348,7 +348,9 @@ function factory ()
     end
 
     -- Function to add a chord at a given marker position
-    function add_chord_to_midi(midiCommand, channel, chord_str, hand_inversion, hand_octave, position, duration, max_notes_per_hand, max_hand_span, priority_intervals)
+    function add_chord_to_midi(midiCommand, channel, chord_str,
+                               hand_inversion, hand_octave, position, duration,
+                               max_notes_per_hand, max_hand_span, priority_intervals, velocity)
         local key, chord_type = parse_chord(chord_str)
 
         -- Get chord notes for both hands
@@ -359,7 +361,7 @@ function factory ()
 
         -- Add MIDI notes to the region
         for _, note in ipairs(hand_notes) do
-            add_midi_note_to_region(midiCommand, channel, note, 64, position, duration)
+            add_midi_note_to_region(midiCommand, channel, note, velocity, position, duration)
         end
 
         return hand_notes
@@ -420,8 +422,8 @@ function factory ()
         local _max_notes_per_hand = { 3, 4 }
         local _inversions_per_bar = { 0, 0 } -- One inversion per chord change
         local _hand_channel = {0,0} -- Both hands go to the same channel
+        local _velocity = {64, 64}
         -- Define priority intervals per hand
-        --
         local _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
         local ticks_per_beat = 1920.0
@@ -446,6 +448,7 @@ function factory ()
                 local max_notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)
                 local inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)
                 local hand_channel = get_config_values("channel", _hand_channel)
+                local velocity = get_config_values("velocity", _velocity)
 
                 local region_position = midi_region:position():beats()
                 local region_end = region_position + midi_region:length():beats()
@@ -579,7 +582,8 @@ function factory ()
                                 start_time + midi_region:start():beats(), duration,
                                 max_notes_per_hand[hand],
                                 max_hand_span[hand],
-                                _priority_intervals[hand])
+                                _priority_intervals[hand],
+                                velocity[hand])
 
                         print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
                                 " for hand ", hand, " inversion ", inversion, " hand octave ", hand_octave[hand],
