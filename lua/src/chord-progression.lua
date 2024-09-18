@@ -79,7 +79,10 @@ function factory ()
     chord_type_map = {
         -- Basic triads and seventh chords
         ['major'] = { 0, 4, 7 },
+        ['maj'] = { 0, 4, 7 },
         ['minor'] = { 0, 3, 7 },
+        ['min'] = { 0, 3, 7 },
+        ['m'] = { 0, 3, 7 },
         ['7'] = { 0, 4, 7, 10 },
         ['maj7'] = { 0, 4, 7, 11 },
         ['min7'] = { 0, 3, 7, 10 },
