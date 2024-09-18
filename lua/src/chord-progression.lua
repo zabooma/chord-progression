@@ -426,6 +426,7 @@ function factory ()
         local _inversions_per_bar = { 0, 0 } -- One inversion per chord change
         local _hand_channel = {0,0} -- Both hands go to the same channel
         local _velocity = {64, 64}
+        local _note_gap = {0, 0}
         -- Define priority intervals per hand
         local _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
@@ -452,6 +453,7 @@ function factory ()
                 local inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)
                 local hand_channel = get_config_values("channel", _hand_channel)
                 local velocity = get_config_values("velocity", _velocity)
+                local note_gap = get_config_values("note_gap", _note_gap)
 
                 local region_position = midi_region:position():beats()
                 local region_end = region_position + midi_region:length():beats()
@@ -489,7 +491,6 @@ function factory ()
                     for i, marker in ipairs(relevantChordMarkers) do
                         -- Add chord marker first
 
-                        local start_position = marker:start():beats() - region_position
                         local end_time = nil
                         if i < #relevantChordMarkers then
                             -- Use start of the next chord as the end time
@@ -511,15 +512,13 @@ function factory ()
 
                         if inversions_per_bar[hand] > 0 then
 
-                            -- TODO create new marker for each inversion change within the duration of the chord.
-
+                            -- Create new marker for each inversion change within the duration of the chord.
                             -- Intervals between the inversions based on the signature
                             local interval = num_beats_per_bar / inversions_per_bar[hand]
                             local interval_beats = math.floor(interval)
                             local interval_ticks = math.tointeger((interval - interval_beats) * ticks_per_beat)
-                            print("inversion interval ", interval, " = ", interval_beats, ":", interval_ticks, " beats")
+                            print("Inversion interval ", interval, " = ", interval_beats, ":", interval_ticks, " beats")
 
-                            -- Loop through each beat and create a new marker
                             -- Start with the beginning of the bar (markers before the first chord marker will be skipped later)
                             local marker_start_at_beat = marker:start():beats():get_beats()
                             local bar_start_at_beat = math.floor(marker_start_at_beat / num_beats_per_bar) * num_beats_per_bar
@@ -570,7 +569,7 @@ function factory ()
                             print("Using region end at ", region_end, " for the duration")
                             end_time = region_end
                         end
-                        local duration = end_time - start_time - region_position
+                        local duration = end_time - start_time - region_position - Temporal.Beats(0, note_gap[hand])
                         local chord_str = marker.name:sub(2)
 
                         local inversion, octave_adjustment, octave

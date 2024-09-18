@@ -5,6 +5,8 @@
 
 This Lua script for Ardour DAW automatically generates a chord progression within selected MIDI regions. It uses location markers to define the chords in the progression, allowing you to easily create complex harmonic structures.
 
+<img src="src/images/img.png" alt="Example 1" style="max-width:500px; border-radius: 10px;">
+
 ## Usage
 
 1. **Create Location Markers:** Define your chord progression by creating location markers in the editor. Each marker name should start with a dot (`.`) followed by the chord symbol (e.g., `.Cmaj7`, `.Fmin`, `.G7`).
@@ -52,13 +54,27 @@ You can customize the chord generation process by adding configuration parameter
 * **Default:** `velocity(64, 64)` (Velocity 64 for both hands)
 * **Example:** `#ChordProgression velocity(80, 100)` (Left hand velocity 80, right hand velocity 100)
 
-## Example
+### note_gap(left hand, right hand)
+
+* **Description:** Creates gaps between notes by shortening note duration by specified number of ticks. 
+* **Default:** `note_gap(0, 0)` (There are no note gaps)
+* **Example:** `#ChordProgression note_gap(30, 30)` (Creates note gap of 30 ticks for both hands)
+
+## Examples
 
 To create a chord progression with Cmaj7, Fmin, and G7 chords, starting at octave 4 for both hands, with a maximum hand span of 12 semitones, and 3 notes per hand, you would:
 
 1. Create location markers named `.Cmaj7`, `.Fmin`, `.G7`.
-2. Create a MIDI region and name it `#ChordProgression octave(4, 4) hand_span(12, 12) notes_per_hand(3, 3)`.
+2. Create a MIDI region and name it `#ChordProgression octave(4, 5) hand_span(12, 12) notes_per_hand(3, 4)`.
 3. Run the script.
+
+<img src="src/images/img_1.png" alt="Example 2" style="max-width:500px; border-radius: 10px;">
+
+This is an example of generating a walking bass line. This is done by playing only left hand and reducing number of notes per chord to one.
+
+Chord progression settings: `#ChordProgression octave(2,5) notes_per_hand(1, 0)  hand_span(13,13) channel(0,0) inversions_per_bar(8,2) velocity(100,0)`
+
+<img src="src/images/img_2.png" alt="Example 3" style="max-width:500px; border-radius: 10px;">
 
 ## Note
 
