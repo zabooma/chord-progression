@@ -10,6 +10,14 @@ Each time a progression is generated it will be slightly different, so keep rege
 
 ## Installation
 
+Download the latest version of the script from the releases section here on GitHub:
+
+<img src="src/images/img_8.png" alt="Releases" style="max-width:500px; border-radius: 10px;">
+
+From the assets sectikon download the compressed archive:
+
+<img src="src/images/img_9.png" alt="Assets" style="max-width:500px; border-radius: 10px;">
+
 Ardour searches for Lua scripts in the scripts folder in $ARDOUR_DATA_PATH, Apart from scripts included directly with Ardour, this includes
 
 ```commandline
@@ -26,7 +34,7 @@ Select `[A] Chord progression" from the list of action scripts`
 
 <img src="src/images/img_6.png" alt="Add action" style="max-width:500px; border-radius: 10px;">
 
-Download and save chord-progression.lua script into the folder per your operating system.
+Save downloaded chord-progression.lua script into the folder per your operating system.
 
 ## Usage
 
