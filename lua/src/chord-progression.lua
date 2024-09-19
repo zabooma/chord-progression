@@ -427,6 +427,7 @@ function factory ()
         local _hand_channel = {0,0} -- Both hands go to the same channel
         local _velocity = {64, 64}
         local _note_gap = {0, 0}
+        local _pattern = {4, 4}
         -- Define priority intervals per hand
         local _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
@@ -454,6 +455,7 @@ function factory ()
                 local hand_channel = get_config_values("channel", _hand_channel)
                 local velocity = get_config_values("velocity", _velocity)
                 local note_gap = get_config_values("note_gap", _note_gap)
+                local pattern = get_config_values("pattern", _pattern)
 
                 local region_position = midi_region:position():beats()
                 local region_end = region_position + midi_region:length():beats()
@@ -510,6 +512,66 @@ function factory ()
                         }
                         table.insert(inversion_change_markers, first_marker)
 
+                        local chord_pattern_interval
+                        local chord_pattern_interval_beats
+                        local chord_pattern_interval_ticks
+                        local chord_pattern_marker_time
+
+                        -- First insert repeating chords per settings
+                        if pattern[hand] > 0 then
+                            -- Interval calculation for the chord repeats
+                            chord_pattern_interval = num_beats_per_bar / pattern[hand]
+                            chord_pattern_interval_beats = math.floor(chord_pattern_interval)
+                            chord_pattern_interval_ticks = math.tointeger((chord_pattern_interval - chord_pattern_interval_beats) * ticks_per_beat)
+                            print("Chord pattern interval ",  chord_pattern_interval, " = ",  chord_pattern_interval_beats, ":",  chord_pattern_interval_ticks, " beats")
+
+                            chord_pattern_marker_time = first_marker_time
+
+                            local marker_time
+                            if inversions_per_bar[hand] > 0 then
+                                -- Calculate where the next inversion change will be
+                                local interval = num_beats_per_bar / inversions_per_bar[hand]
+                                local interval_beats = math.floor(interval)
+                                local interval_ticks = math.tointeger((interval - interval_beats) * ticks_per_beat)
+                                print("Inversion interval ", interval, " = ", interval_beats, ":", interval_ticks, " beats")
+
+                                -- Start with the beginning of the bar (markers before the first chord marker will be skipped later)
+                                local marker_start_at_beat = marker:start():beats():get_beats()
+                                local bar_start_at_beat = math.floor(marker_start_at_beat / num_beats_per_bar) * num_beats_per_bar
+                                marker_time = Temporal.Beats(bar_start_at_beat, 0)
+                                -- Make sure next marker is after the first marker
+                                while marker_time <= first_marker_time do
+                                    marker_time = marker_time + Temporal.Beats(interval_beats, interval_ticks)
+                                end
+
+                            else
+                                local next_marker = relevantChordMarkers[i+1]
+                                if next_marker then
+                                    marker_time = next_marker:start():beats()
+                                else
+                                    marker_time = end_time
+                                end
+                            end
+
+                            while chord_pattern_marker_time < marker_time and chord_pattern_marker_time < end_time do
+                                if chord_pattern_marker_time > first_marker_time then
+                                    -- Create a new marker for this beat
+                                    -- We need to mark this chord as a repeat, with the same inversion as the previous one
+                                    local marker_name = "*" .. chord_str
+                                    local new_marker = {
+                                        name = marker_name,
+                                        time = chord_pattern_marker_time
+                                    }
+
+                                    -- Add the new marker to the inversion_change_markers table
+                                    print("Adding new chord repeating point for ", chord_str, " at ", chord_pattern_marker_time)
+                                    table.insert(inversion_change_markers, new_marker)
+                                end
+                                -- prepare for the next marker
+                                chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
+                            end
+                        end
+
                         if inversions_per_bar[hand] > 0 then
 
                             -- Create new marker for each inversion change within the duration of the chord.
@@ -523,34 +585,58 @@ function factory ()
                             local marker_start_at_beat = marker:start():beats():get_beats()
                             local bar_start_at_beat = math.floor(marker_start_at_beat / num_beats_per_bar) * num_beats_per_bar
                             local marker_time = Temporal.Beats(bar_start_at_beat, 0)
-                            print("Bar starts at ", bar_start_at_beat, " (", marker_time, ")")
+                            -- Make sure next marker is after the first marker
+                            while marker_time <= first_marker_time do
+                                marker_time = marker_time + Temporal.Beats(interval_beats, interval_ticks)
+                            end
+                            print("Bar starts at ", bar_start_at_beat, " next marker at (", marker_time, ")")
+
                             while marker_time < end_time do
 
-                                if marker_time > first_marker_time then
-                                    -- Create a new marker for this beat
-                                    local marker_name = marker:name()
-                                    local new_marker = {
-                                        name = marker_name,
-                                        time = marker_time
-                                    }
+                                -- Create a new marker for this beat
+                                local marker_name = marker:name()
+                                local new_marker = {
+                                    name = marker_name,
+                                    time = marker_time
+                                }
 
-                                    -- Add the new marker to the inversion_change_markers table
-                                    print("Adding new inversion change point for ", chord_str, " at ", marker_time)
-                                    table.insert(inversion_change_markers, new_marker)
-                                end
+                                -- Add the new marker to the inversion_change_markers table
+                                print("Adding new inversion change point for ", chord_str, " at ", marker_time)
+                                table.insert(inversion_change_markers, new_marker)
+
                                 -- prepare for the next marker
+                                local prev_marker_time = marker_time
                                 marker_time = marker_time + Temporal.Beats(interval_beats, interval_ticks)
+
+                                -- Insert repeating chords till the next inversion change or end of region
+
+                                if pattern[hand] > 0 then
+                                    chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
+
+                                    while chord_pattern_marker_time < marker_time and chord_pattern_marker_time < end_time  do
+                                        if chord_pattern_marker_time > prev_marker_time then
+                                            -- Create a new marker for this beat
+                                            -- We need to mark this chord as a repeat, with the same inversion as the previous one
+                                            local chord_pattern_marker_name = "*" .. chord_str
+                                            local chord_pattern_new_marker = {
+                                                name = chord_pattern_marker_name,
+                                                time = chord_pattern_marker_time
+                                            }
+
+                                            -- Add the new marker to the inversion_change_markers table
+                                            print("Adding new chord repeating point for ", chord_str, " at ", chord_pattern_marker_time)
+                                            table.insert(inversion_change_markers, chord_pattern_new_marker)
+                                        end
+                                        -- prepare for the next marker
+                                        chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
+                                    end
+
+                                end
+
                             end
 
                             print("Inversion change markers:", print_table(inversion_change_markers))
 
-                            table.sort(inversion_change_markers, function(a, b)
-                                return a.time < b.time
-                            end)
-
-                            print("Inversion change markers after sorting:", print_table(inversion_change_markers))
-
-                            -- endTODO
                         end
 
                     end
@@ -571,12 +657,17 @@ function factory ()
                         end
                         local duration = end_time - start_time - region_position - Temporal.Beats(0, note_gap[hand])
                         local chord_str = marker.name:sub(2)
+                        local chord_prefix = marker.name:sub(1,1)
 
                         local inversion, octave_adjustment, octave
 
-                        inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
+                        if chord_prefix == "*" then
+                            -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
+                            inversion, octave_adjustment = previous_inversion, previous_octave_adjustment
+                        else
+                            inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
+                        end
                         octave = hand_octave[hand] + octave_adjustment
-
                         -- Add chord to MIDI for the current hand
                         -- Note position needs to be adjusted with region::start()
                         -- (if region start boundary was moved after region was created or extended)

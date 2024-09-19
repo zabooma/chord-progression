@@ -76,6 +76,13 @@ Chord progression settings: `#ChordProgression octave(2,5) notes_per_hand(1, 0) 
 
 <img src="src/images/img_2.png" alt="Example 3" style="max-width:500px; border-radius: 10px;">
 
+This is an example of triplets on the right hand and walking bass on the left hand. Note gap is added for the left hand to emphasize the rhythm pattern
+
+Chord progression settings:`#ChordProgression channel(0,1) octave(3, 5) pattern(4,12) inversions_per_bar(0,2) note_gap(40,120) notes_per_hand(1,4)`
+
+<img src="src/images/img_3.png" alt="Example 3" style="max-width:500px; border-radius: 10px;">
+
+
 ## Note
 
 The script currently supports a wide variety of chord types, including major, minor, seventh, ninth, eleventh, thirteenth, suspended, and altered chords. It also includes logic to optimize chord voicings for playability.
