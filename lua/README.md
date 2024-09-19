@@ -60,6 +60,12 @@ You can customize the chord generation process by adding configuration parameter
 * **Default:** `note_gap(0, 0)` (There are no note gaps)
 * **Example:** `#ChordProgression note_gap(30, 30)` (Creates note gap of 30 ticks for both hands)
 
+### pattern(left hand, right hand)
+
+* **Description:** Simple rhythm pattern. Defined as number of chords repeats per bar, at beats defined in pattern. 0 means no repeats, 2 means two chord repeats per bar. Negative value indicates swing nots, for example -12 would create triples with swing notes. Chords are repeated with the same inversion as the previous ones. Note that inversions also count as chord triggers and repeats are combined together with repeats.
+* **Default:** `pattern(0, 0)` (There are no chord repeats)
+* **Example:** `#ChordProgression pattern(4, 8) inversions_per_bar(2, 2)` (Four chord repeats per bar on the left hand: two per inversion and 8 chord repeats on the right hand: four per inversion)
+
 ## Examples
 
 To create a chord progression with Cmaj7, Fmin, and G7 chords, starting at octave 4 for both hands, with a maximum hand span of 12 semitones, and 3 notes per hand, you would:
@@ -76,12 +82,20 @@ Chord progression settings: `#ChordProgression octave(2,5) notes_per_hand(1, 0) 
 
 <img src="src/images/img_2.png" alt="Example 3" style="max-width:500px; border-radius: 10px;">
 
-This is an example of triplets on the right hand and walking bass on the left hand. Note gap is added for the left hand to emphasize the rhythm pattern
+This is an example of triplets on the right hand and walking bass on the left hand. 
+Note gap is added for the left hand to emphasize the rhythm pattern
 
 Chord progression settings:`#ChordProgression channel(0,1) octave(3, 5) pattern(4,12) inversions_per_bar(0,2) note_gap(40,120) notes_per_hand(1,4)`
 
-<img src="src/images/img_3.png" alt="Example 3" style="max-width:500px; border-radius: 10px;">
+<img src="src/images/img_3.png" alt="Example 4" style="max-width:500px; border-radius: 10px;">
 
+This is an example of triplets on the right hand with swing notes and walking bass on the left hand. 
+Pattern for right hand is defined as a negative value so that swing triplets are generated. 
+Note gap is added for the left hand to emphasize the rhythm pattern.
+
+Chord progression settings:`#ChordProgression channel(0,1) octave(3, 5) pattern(4,-12) inversions_per_bar(0,2) note_gap(120,120) notes_per_hand(1,4)`
+
+<img src="src/images/img_4.png" alt="Example 5" style="max-width:500px; border-radius: 10px;">
 
 ## Note
 

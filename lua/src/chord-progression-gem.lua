@@ -417,46 +417,6 @@ function factory ()
         return values
     end
 
-    function align_to_bar(position, num_beats_per_bar)
-        -- Start with the beginning of the bar (markers before the first chord marker will be skipped later)
-        local marker_start_at_beat = position:get_beats()
-        local bar_start_at_beat = math.floor(marker_start_at_beat / num_beats_per_bar) * num_beats_per_bar
-        return Temporal.Beats(bar_start_at_beat, 0)
-    end
-
-    -- Insert repeating chords
-    function add_chord_repeats(inversion_change_markers, chord_str,
-                               chord_pattern_marker_time, first_marker_time, end_time, pattern,
-                               chord_pattern_interval_beats, chord_pattern_interval_ticks)
-        local cnt = 0
-        local chord_marker
-        while chord_pattern_marker_time < end_time do
-            -- Handle swing notes
-            if pattern < 0 and (cnt % 3) == 1 then
-                -- this is break
-                chord_marker = "#"
-            else
-                chord_marker = "*" .. chord_str
-            end
-            if chord_pattern_marker_time > first_marker_time then
-                -- Create a new marker for this beat
-                -- We need to mark this chord as a repeat, with the same inversion as the previous one
-                local marker_name = chord_marker
-                local new_marker = {
-                    name = marker_name,
-                    time = chord_pattern_marker_time
-                }
-
-                -- Add the new marker to the inversion_change_markers table
-                print("Adding new chord repeating point for ", chord_str, " at ", chord_pattern_marker_time)
-                table.insert(inversion_change_markers, new_marker)
-            end
-            -- prepare for the next marker
-            chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
-            cnt = cnt + 1
-        end
-    end
-
     return function()
 
         -- Globals
@@ -467,7 +427,7 @@ function factory ()
         local _hand_channel = {0,0} -- Both hands go to the same channel
         local _velocity = {64, 64}
         local _note_gap = {0, 0}
-        local _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
+        local _pattern = {4, 4}
         -- Define priority intervals per hand
         local _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
@@ -558,12 +518,14 @@ function factory ()
                         local chord_pattern_marker_time
 
                         -- First insert repeating chords per settings
-                        if pattern[hand] ~= 0 then
+                        if pattern[hand] > 0 then
                             -- Interval calculation for the chord repeats
-                            chord_pattern_interval = num_beats_per_bar / math.abs(pattern[hand])
+                            chord_pattern_interval = num_beats_per_bar / pattern[hand]
                             chord_pattern_interval_beats = math.floor(chord_pattern_interval)
                             chord_pattern_interval_ticks = math.tointeger((chord_pattern_interval - chord_pattern_interval_beats) * ticks_per_beat)
                             print("Chord pattern interval ",  chord_pattern_interval, " = ",  chord_pattern_interval_beats, ":",  chord_pattern_interval_ticks, " beats")
+
+                            chord_pattern_marker_time = first_marker_time
 
                             local marker_time
                             if inversions_per_bar[hand] > 0 then
@@ -591,11 +553,23 @@ function factory ()
                                 end
                             end
 
-                            chord_pattern_marker_time = align_to_bar(first_marker_time, num_beats_per_bar)
+                            while chord_pattern_marker_time < marker_time and chord_pattern_marker_time < end_time do
+                                if chord_pattern_marker_time > first_marker_time then
+                                    -- Create a new marker for this beat
+                                    -- We need to mark this chord as a repeat, with the same inversion as the previous one
+                                    local marker_name = "*" .. chord_str
+                                    local new_marker = {
+                                        name = marker_name,
+                                        time = chord_pattern_marker_time
+                                    }
 
-                            add_chord_repeats(inversion_change_markers, chord_str,
-                                    chord_pattern_marker_time, first_marker_time, math.min(marker_time, end_time), pattern[hand],
-                                    chord_pattern_interval_beats, chord_pattern_interval_ticks)
+                                    -- Add the new marker to the inversion_change_markers table
+                                    print("Adding new chord repeating point for ", chord_str, " at ", chord_pattern_marker_time)
+                                    table.insert(inversion_change_markers, new_marker)
+                                end
+                                -- prepare for the next marker
+                                chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
+                            end
                         end
 
                         if inversions_per_bar[hand] > 0 then
@@ -636,12 +610,26 @@ function factory ()
 
                                 -- Insert repeating chords till the next inversion change or end of region
 
-                                if pattern[hand] ~= 0 then
+                                if pattern[hand] > 0 then
                                     chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
 
-                                    add_chord_repeats(inversion_change_markers, chord_str,
-                                            prev_marker_time, prev_marker_time, math.min(marker_time, end_time), pattern[hand],
-                                            chord_pattern_interval_beats, chord_pattern_interval_ticks)
+                                    while chord_pattern_marker_time < marker_time and chord_pattern_marker_time < end_time  do
+                                        if chord_pattern_marker_time > prev_marker_time then
+                                            -- Create a new marker for this beat
+                                            -- We need to mark this chord as a repeat, with the same inversion as the previous one
+                                            local chord_pattern_marker_name = "*" .. chord_str
+                                            local chord_pattern_new_marker = {
+                                                name = chord_pattern_marker_name,
+                                                time = chord_pattern_marker_time
+                                            }
+
+                                            -- Add the new marker to the inversion_change_markers table
+                                            print("Adding new chord repeating point for ", chord_str, " at ", chord_pattern_marker_time)
+                                            table.insert(inversion_change_markers, chord_pattern_new_marker)
+                                        end
+                                        -- prepare for the next marker
+                                        chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
+                                    end
 
                                 end
 
@@ -671,39 +659,36 @@ function factory ()
                         local chord_str = marker.name:sub(2)
                         local chord_prefix = marker.name:sub(1,1)
 
-                        -- Skip breaks
-                        if chord_prefix ~= "#" then
-                            local inversion, octave_adjustment, octave
-                            if chord_prefix == "*" then
-                                -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
-                                inversion, octave_adjustment = previous_inversion, previous_octave_adjustment
-                            else
-                                inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
-                            end
-                            octave = hand_octave[hand] + octave_adjustment
-                            -- Add chord to MIDI for the current hand
-                            -- Note position needs to be adjusted with region::start()
-                            -- (if region start boundary was moved after region was created or extended)
-                            local chord_notes = add_chord_to_midi(midiCommand, hand_channel[hand], chord_str, inversion, octave,
-                                    start_time + midi_region:start():beats(), duration,
-                                    max_notes_per_hand[hand],
-                                    max_hand_span[hand],
-                                    _priority_intervals[hand],
-                                    velocity[hand])
+                        local inversion, octave_adjustment, octave
 
-                            print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
-                                    " for hand ", hand, " inversion ", inversion, " hand octave ", hand_octave[hand],
-                                    " octave adjustment ", octave_adjustment,
-                                    " chord_notes ", print_table(chord_notes))
-
-                            -- Update previous settings based on hand
-                            previous_inversion = inversion
-                            previous_octave_adjustment = octave_adjustment
-                            -- Save current chord string and notes for the next iteration
-                            previous_chord_str = chord_str
-                            previous_chord_notes = chord_notes
-
+                        if chord_prefix == "*" then
+                            -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
+                            inversion, octave_adjustment = previous_inversion, previous_octave_adjustment
+                        else
+                            inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
                         end
+                        octave = hand_octave[hand] + octave_adjustment
+                        -- Add chord to MIDI for the current hand
+                        -- Note position needs to be adjusted with region::start()
+                        -- (if region start boundary was moved after region was created or extended)
+                        local chord_notes = add_chord_to_midi(midiCommand, hand_channel[hand], chord_str, inversion, octave,
+                                start_time + midi_region:start():beats(), duration,
+                                max_notes_per_hand[hand],
+                                max_hand_span[hand],
+                                _priority_intervals[hand],
+                                velocity[hand])
+
+                        print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
+                                " for hand ", hand, " inversion ", inversion, " hand octave ", hand_octave[hand],
+                                " octave adjustment ", octave_adjustment,
+                                " chord_notes ", print_table(chord_notes))
+
+                        -- Update previous settings based on hand
+                        previous_inversion = inversion
+                        previous_octave_adjustment = octave_adjustment
+                        -- Save current chord string and notes for the next iteration
+                        previous_chord_str = chord_str
+                        previous_chord_notes = chord_notes
 
                     end
 
