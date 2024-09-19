@@ -4,8 +4,29 @@
 ## Introduction
 
 This Lua script for Ardour DAW automatically generates a chord progression within selected MIDI regions. It uses location markers to define the chords in the progression, allowing you to easily create complex harmonic structures.
+Each time a progression is generated it will be slightly different, so keep regenerating till you get one that you like.
 
 <img src="src/images/img.png" alt="Example 1" style="max-width:500px; border-radius: 10px;">
+
+## Installation
+
+Ardour searches for Lua scripts in the scripts folder in $ARDOUR_DATA_PATH, Apart from scripts included directly with Ardour, this includes
+
+```commandline
+GNU/Linux:	$HOME/.config/ardour8/scripts
+Mac OS X:	$HOME/Library/Preferences/Ardour8/scripts
+Windows:	%localappdata%\ardour8\scripts
+```
+
+In order to be ab le to execute the script you need to add it into one of the available slots in the `Edit/Lua Scripts/Script Manager` option:
+
+<img src="src/images/img_5.png" alt="Script manager" style="max-width:500px; border-radius: 10px;">
+
+Select `[A] Chord progression" from the list of action scripts`
+
+<img src="src/images/img_6.png" alt="Add action" style="max-width:500px; border-radius: 10px;">
+
+Download and save chord-progression.lua script into the folder per your operating system.
 
 ## Usage
 
@@ -136,6 +157,10 @@ To create a chord progression with Cmaj7, Fmin, and G7 chords, starting at octav
 
 <img src="src/images/img_1.png" alt="Example 2" style="max-width:500px; border-radius: 10px;">
 
+Now change the #ChordProgression settings to make two inversions per bar for both hands:`#ChordProgression octave(4, 5) hand_span(12, 12) notes_per_hand(3, 4) inversions_per_bar(2,2)`
+
+<img src="src/images/img_7.png" alt="Example 6" style="max-width:500px; border-radius: 10px;">
+
 This is an example of generating a walking bass line. This is done by playing only left hand and reducing number of notes per chord to one.
 
 Chord progression settings: `#ChordProgression octave(2,5) notes_per_hand(1, 0)  hand_span(13,13) channel(0,0) inversions_per_bar(8,2) velocity(100,0)`
@@ -157,8 +182,12 @@ Chord progression settings:`#ChordProgression channel(0,1) octave(3, 5) pattern(
 
 <img src="src/images/img_4.png" alt="Example 5" style="max-width:500px; border-radius: 10px;">
 
-## Note
+## Author
 
-The script currently supports a wide variety of chord types, including major, minor, seventh, ninth, eleventh, thirteenth, suspended, and altered chords. It also includes logic to optimize chord voicings for playability.
+Frank Povazanj
+
+## License
+
+MIT
 
 
