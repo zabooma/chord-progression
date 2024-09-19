@@ -66,6 +66,66 @@ You can customize the chord generation process by adding configuration parameter
 * **Default:** `pattern(0, 0)` (There are no chord repeats)
 * **Example:** `#ChordProgression pattern(4, 8) inversions_per_bar(2, 2)` (Four chord repeats per bar on the left hand: two per inversion and 8 chord repeats on the right hand: four per inversion)
 
+## Supported chord types
+
+```lua
+        -- Basic triads and seventh chords
+        ['major'] = { 0, 4, 7 },
+        ['maj'] = { 0, 4, 7 },
+        ['minor'] = { 0, 3, 7 },
+        ['min'] = { 0, 3, 7 },
+        ['m'] = { 0, 3, 7 },
+        ['7'] = { 0, 4, 7, 10 },
+        ['maj7'] = { 0, 4, 7, 11 },
+        ['min7'] = { 0, 3, 7, 10 },
+        ['dim'] = { 0, 3, 6 },
+        ['aug'] = { 0, 4, 8 },
+
+        -- Ninth, eleventh, and thirteenth chords
+        ['7/9'] = { 0, 4, 7, 10, 14 },
+        ['9'] = { 0, 4, 7, 10, 14 },
+        ['min9'] = { 0, 3, 7, 10, 14 },
+        ['maj9'] = { 0, 4, 7, 11, 14 },
+        ['11'] = { 0, 4, 7, 10, 14, 17 },
+        ['maj11'] = { 0, 4, 7, 11, 14, 17 },
+        ['min11'] = { 0, 3, 7, 10, 14, 17 },
+        ['13'] = { 0, 4, 7, 10, 14, 17, 21 },
+        ['maj13'] = { 0, 4, 7, 11, 14, 21 },
+        ['min13'] = { 0, 3, 7, 10, 14, 21 },
+
+        -- Altered dominants
+        ['7b5'] = { 0, 4, 6, 10 },
+        ['7#5'] = { 0, 4, 8, 10 },
+        ['7b9'] = { 0, 4, 7, 10, 13 },
+        ['7#9'] = { 0, 4, 7, 10, 15 },
+        ['7b13'] = { 0, 4, 7, 10, 20 },
+        ['7#11'] = { 0, 4, 7, 10, 18 },
+
+        -- Added tone chords
+        ['add9'] = { 0, 4, 7, 14 },
+        ['min(add9)'] = { 0, 3, 7, 14 },
+        ['add11'] = { 0, 4, 7, 17 },
+        ['add13'] = { 0, 4, 7, 21 },
+        ['min(add11)'] = { 0, 3, 7, 17 },
+
+        -- Suspended chords
+        ['sus2'] = { 0, 2, 7 },
+        ['sus4'] = { 0, 5, 7 },
+        ['sus2/b7'] = { 0, 2, 7, 10 },
+        ['sus4/b7'] = { 0, 5, 7, 10 },
+
+        -- Complex chords
+        ['maj7#11'] = { 0, 4, 7, 11, 18 },
+        ['min(maj7)'] = { 0, 3, 7, 11 },
+        ['dim(maj7)'] = { 0, 3, 6, 11 },
+        ['7b13'] = { 0, 4, 7, 10, 20 },
+
+        -- Diminished and augmented variations
+        ['dim7'] = { 0, 3, 6, 9 },
+        ['min7b5'] = { 0, 3, 6, 10 },
+        ['aug7'] = { 0, 4, 8, 10 }
+
+```
 ## Examples
 
 To create a chord progression with Cmaj7, Fmin, and G7 chords, starting at octave 4 for both hands, with a maximum hand span of 12 semitones, and 3 notes per hand, you would:
