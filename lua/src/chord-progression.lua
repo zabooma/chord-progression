@@ -354,6 +354,11 @@ function factory ()
     function add_chord_to_midi(midiCommand, channel, chord_str,
                                hand_inversion, hand_octave, position, duration,
                                max_notes_per_hand, max_hand_span, priority_intervals, velocity)
+
+        print("add_chord_to_midi", midiCommand, channel, chord_str,
+                hand_inversion, hand_octave, position, duration,
+                max_notes_per_hand, max_hand_span, priority_intervals, velocity)
+
         local key, chord_type = parse_chord(chord_str)
 
         -- Get chord notes for both hands
@@ -457,21 +462,102 @@ function factory ()
         end
     end
 
+    -- Process chord markers
+    function process_chord_markers(chord_markers, midi_region, hand, midiCommand, hand_config)
+
+        local region_position = midi_region:position():beats()
+        local region_end = region_position + midi_region:length():beats()
+
+        local previous_chord_str = nil
+        local previous_inversion = nil
+        local previous_octave_adjustment = nil
+        local previous_chord_notes = {}
+
+        for i, marker in ipairs(chord_markers) do
+
+            local start_time = marker.time - region_position
+            local end_time = nil
+            if i < #chord_markers then
+                -- Use start of the next chord as the end time
+                print("Using next inversion point at ", chord_markers[i + 1].time, " for the duration")
+                end_time = chord_markers[i + 1].time
+            else
+                -- Use end of the region as the end time
+                print("Using region end at ", region_end, " for the duration")
+                end_time = region_end
+            end
+            local duration = end_time - start_time - region_position - Temporal.Beats(0, hand_config.note_gap)
+            local chord_str = marker.name:sub(2)
+            local chord_prefix = marker.name:sub(1,1)
+
+            -- Skip breaks
+            if chord_prefix ~= "#" then
+                local inversion, octave_adjustment, octave
+                if chord_prefix == "*" then
+                    -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
+                    inversion, octave_adjustment = previous_inversion, previous_octave_adjustment
+                else
+                    inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
+                end
+                octave = hand_config.octave + octave_adjustment
+                -- Add chord to MIDI for the current hand
+                -- Note position needs to be adjusted with region::start()
+                -- (if region start boundary was moved after region was created or extended)
+                local chord_notes = add_chord_to_midi(midiCommand, hand_config.channel, chord_str, inversion, octave,
+                        start_time + midi_region:start():beats(), duration,
+                        hand_config.notes_per_hand,
+                        hand_config.hand_span,
+                        hand_config.priority_intervals,
+                        hand_config.velocity)
+
+                print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
+                        " for hand ", hand, " inversion ", inversion, " hand octave ", hand_config.octave,
+                        " octave adjustment ", octave_adjustment,
+                        " chord_notes ", print_table(chord_notes))
+
+                -- Update previous settings based on hand
+                previous_inversion = inversion
+                previous_octave_adjustment = octave_adjustment
+                -- Save current chord string and notes for the next iteration
+                previous_chord_str = chord_str
+                previous_chord_notes = chord_notes
+
+            end
+
+        end
+
+    end
+
+    -- Function to retrieve config values for both hands
+    function get_hand_config(hand)
+        return {
+            octave = get_config_values("octave", _hand_octave)[hand],
+            hand_span = get_config_values("hand_span", _max_hand_span)[hand],
+            notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)[hand],
+            inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)[hand],
+            channel = get_config_values("channel", _hand_channel)[hand],
+            velocity = get_config_values("velocity", _velocity)[hand],
+            note_gap = get_config_values("note_gap", _note_gap)[hand],
+            pattern = get_config_values("pattern", _pattern)[hand],
+            priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand]
+        }
+    end
+
+    -- Globals
+    _hand_octave = { 3, 5 }
+    _max_hand_span = { 13, 13 }
+    _max_notes_per_hand = { 3, 4 }
+    _inversions_per_bar = { 0, 0 } -- One inversion per chord change
+    _hand_channel = {0,0} -- Both hands go to the same channel
+    _velocity = {64, 64}
+    _note_gap = {0, 0}
+    _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
+    -- Define priority intervals per hand
+    _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
+
+    ticks_per_beat = 1920.0
+
     return function()
-
-        -- Globals
-        local _hand_octave = { 3, 5 }
-        local _max_hand_span = { 13, 13 }
-        local _max_notes_per_hand = { 3, 4 }
-        local _inversions_per_bar = { 0, 0 } -- One inversion per chord change
-        local _hand_channel = {0,0} -- Both hands go to the same channel
-        local _velocity = {64, 64}
-        local _note_gap = {0, 0}
-        local _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
-        -- Define priority intervals per hand
-        local _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
-
-        local ticks_per_beat = 1920.0
 
         -- Get the selected region
         local sel = Editor:get_selection()
@@ -487,15 +573,6 @@ function factory ()
 
                 -- Parse configuration options
                 chord_progression_config = parse_chord_progression_config(midi_region:name())
-
-                local hand_octave = get_config_values("octave", _hand_octave)
-                local max_hand_span = get_config_values("hand_span", _max_hand_span)
-                local max_notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)
-                local inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)
-                local hand_channel = get_config_values("channel", _hand_channel)
-                local velocity = get_config_values("velocity", _velocity)
-                local note_gap = get_config_values("note_gap", _note_gap)
-                local pattern = get_config_values("pattern", _pattern)
 
                 local region_position = midi_region:position():beats()
                 local region_end = region_position + midi_region:length():beats()
@@ -513,20 +590,17 @@ function factory ()
 
                 -- Setup midi command for the region
                 local midiModel = midi_region:midi_source(0):model()
-                local midiCommand = midiModel:new_note_diff_command("Add MIDI Note")
+                local midi_command = midiModel:new_note_diff_command("Add MIDI Note")
 
                 -- Delete existing notes first
                 for note in ARDOUR.LuaAPI.note_list(midiModel):iter() do
-                    midiCommand:remove(note)
+                    midi_command:remove(note)
                 end
 
                 -- Process left and right hands separately
                 for _, hand in ipairs({ 1, 2 }) do
 
-                    local previous_chord_str = nil
-                    local previous_inversion = nil
-                    local previous_octave_adjustment = nil
-                    local previous_chord_notes = {}
+                    local hand_config = get_hand_config(hand)
 
                     -- Add all inversion change points as chords in the timeline
                     local inversion_change_markers = {}
@@ -558,17 +632,17 @@ function factory ()
                         local chord_pattern_marker_time
 
                         -- First insert repeating chords per settings
-                        if pattern[hand] ~= 0 then
+                        if hand_config.pattern ~= 0 then
                             -- Interval calculation for the chord repeats
-                            chord_pattern_interval = num_beats_per_bar / math.abs(pattern[hand])
+                            chord_pattern_interval = num_beats_per_bar / math.abs(hand_config.pattern)
                             chord_pattern_interval_beats = math.floor(chord_pattern_interval)
                             chord_pattern_interval_ticks = math.tointeger((chord_pattern_interval - chord_pattern_interval_beats) * ticks_per_beat)
                             print("Chord pattern interval ",  chord_pattern_interval, " = ",  chord_pattern_interval_beats, ":",  chord_pattern_interval_ticks, " beats")
 
                             local marker_time
-                            if inversions_per_bar[hand] > 0 then
+                            if hand_config.inversions_per_bar > 0 then
                                 -- Calculate where the next inversion change will be
-                                local interval = num_beats_per_bar / inversions_per_bar[hand]
+                                local interval = num_beats_per_bar / hand_config.inversions_per_bar
                                 local interval_beats = math.floor(interval)
                                 local interval_ticks = math.tointeger((interval - interval_beats) * ticks_per_beat)
                                 print("Inversion interval ", interval, " = ", interval_beats, ":", interval_ticks, " beats")
@@ -594,15 +668,15 @@ function factory ()
                             chord_pattern_marker_time = align_to_bar(first_marker_time, num_beats_per_bar)
 
                             add_chord_repeats(inversion_change_markers, chord_str,
-                                    chord_pattern_marker_time, first_marker_time, math.min(marker_time, end_time), pattern[hand],
+                                    chord_pattern_marker_time, first_marker_time, math.min(marker_time, end_time), hand_config.pattern,
                                     chord_pattern_interval_beats, chord_pattern_interval_ticks)
                         end
 
-                        if inversions_per_bar[hand] > 0 then
+                        if hand_config.inversions_per_bar > 0 then
 
                             -- Create new marker for each inversion change within the duration of the chord.
                             -- Intervals between the inversions based on the signature
-                            local interval = num_beats_per_bar / inversions_per_bar[hand]
+                            local interval = num_beats_per_bar / hand_config.inversions_per_bar
                             local interval_beats = math.floor(interval)
                             local interval_ticks = math.tointeger((interval - interval_beats) * ticks_per_beat)
                             print("Inversion interval ", interval, " = ", interval_beats, ":", interval_ticks, " beats")
@@ -636,11 +710,11 @@ function factory ()
 
                                 -- Insert repeating chords till the next inversion change or end of region
 
-                                if pattern[hand] ~= 0 then
+                                if hand_config.pattern ~= 0 then
                                     chord_pattern_marker_time = chord_pattern_marker_time + Temporal.Beats(chord_pattern_interval_beats, chord_pattern_interval_ticks)
 
                                     add_chord_repeats(inversion_change_markers, chord_str,
-                                            prev_marker_time, prev_marker_time, math.min(marker_time, end_time), pattern[hand],
+                                            prev_marker_time, prev_marker_time, math.min(marker_time, end_time), hand_config.pattern,
                                             chord_pattern_interval_beats, chord_pattern_interval_ticks)
 
                                 end
@@ -654,63 +728,13 @@ function factory ()
                     end
 
                     -- Process chord markers in range
-                    for i, marker in ipairs(inversion_change_markers) do
-
-                        local start_time = marker.time - region_position
-                        local end_time = nil
-                        if i < #inversion_change_markers then
-                            -- Use start of the next chord as the end time
-                            print("Using next inversion point at ", inversion_change_markers[i + 1].time, " for the duration")
-                            end_time = inversion_change_markers[i + 1].time
-                        else
-                            -- Use end of the region as the end time
-                            print("Using region end at ", region_end, " for the duration")
-                            end_time = region_end
-                        end
-                        local duration = end_time - start_time - region_position - Temporal.Beats(0, note_gap[hand])
-                        local chord_str = marker.name:sub(2)
-                        local chord_prefix = marker.name:sub(1,1)
-
-                        -- Skip breaks
-                        if chord_prefix ~= "#" then
-                            local inversion, octave_adjustment, octave
-                            if chord_prefix == "*" then
-                                -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
-                                inversion, octave_adjustment = previous_inversion, previous_octave_adjustment
-                            else
-                                inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
-                            end
-                            octave = hand_octave[hand] + octave_adjustment
-                            -- Add chord to MIDI for the current hand
-                            -- Note position needs to be adjusted with region::start()
-                            -- (if region start boundary was moved after region was created or extended)
-                            local chord_notes = add_chord_to_midi(midiCommand, hand_channel[hand], chord_str, inversion, octave,
-                                    start_time + midi_region:start():beats(), duration,
-                                    max_notes_per_hand[hand],
-                                    max_hand_span[hand],
-                                    _priority_intervals[hand],
-                                    velocity[hand])
-
-                            print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
-                                    " for hand ", hand, " inversion ", inversion, " hand octave ", hand_octave[hand],
-                                    " octave adjustment ", octave_adjustment,
-                                    " chord_notes ", print_table(chord_notes))
-
-                            -- Update previous settings based on hand
-                            previous_inversion = inversion
-                            previous_octave_adjustment = octave_adjustment
-                            -- Save current chord string and notes for the next iteration
-                            previous_chord_str = chord_str
-                            previous_chord_notes = chord_notes
-
-                        end
-
-                    end
+                    process_chord_markers(inversion_change_markers, midi_region, hand, midi_command, hand_config)
 
                 end
 
-                -- Apply the command to the MIDI model
-                midiModel:apply_command(Session, midiCommand)
+                -- Apply the command to the MIDI model (changes to the current region)
+                midiModel:apply_command(Session, midi_command)
+
             end
         end
 
