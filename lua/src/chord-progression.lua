@@ -417,6 +417,13 @@ function factory ()
         return values
     end
 
+    function align_to_bar(position, num_beats_per_bar)
+        -- Start with the beginning of the bar (markers before the first chord marker will be skipped later)
+        local marker_start_at_beat = position:get_beats()
+        local bar_start_at_beat = math.floor(marker_start_at_beat / num_beats_per_bar) * num_beats_per_bar
+        return Temporal.Beats(bar_start_at_beat, 0)
+    end
+
     return function()
 
         -- Globals
@@ -525,7 +532,7 @@ function factory ()
                             chord_pattern_interval_ticks = math.tointeger((chord_pattern_interval - chord_pattern_interval_beats) * ticks_per_beat)
                             print("Chord pattern interval ",  chord_pattern_interval, " = ",  chord_pattern_interval_beats, ":",  chord_pattern_interval_ticks, " beats")
 
-                            chord_pattern_marker_time = first_marker_time
+                            chord_pattern_marker_time = align_to_bar(first_marker_time, num_beats_per_bar)
 
                             local marker_time
                             if inversions_per_bar[hand] > 0 then
