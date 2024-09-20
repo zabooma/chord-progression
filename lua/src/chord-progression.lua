@@ -210,16 +210,18 @@ function factory ()
     end
 
     -- Function to choose the best inversion based on the previous chord
-    function choose_inversion(chord_str, previous_inversion, previous_chord, previous_octave_adjustment)
+    function choose_inversion(chord_str, previous_inversion, previous_chord, previous_octave_adjustment, previous_chord_notes, octave)
         local key, chord_type = parse_chord(chord_str)
 
         print("Choosing inversion for ", chord_str, " previous chord ", previous_chord, " inversion ", previous_inversion, " octave adjustment ", previous_octave_adjustment)
 
         if previous_chord then
             local prev_key, prev_chord_type = parse_chord(previous_chord)
-            local prev_notes = get_chord_notes(prev_key, prev_chord_type, 4 + previous_octave_adjustment, previous_inversion)
+            if not previous_chord_notes then
+                previous_chord_notes = get_chord_notes(prev_key, prev_chord_type, octave + previous_octave_adjustment, previous_inversion)
+            end
 
-            print("Previous chord notes", print_table(prev_notes))
+            print("Previous chord notes", print_table(previous_chord_notes))
 
             local best_inversion = 0
             local best_octave_adjustment = 0
@@ -229,15 +231,16 @@ function factory ()
             local all_inversions = {}
             for octave_adjustment = -1, 1 do
                 for inversion = 0, #chord_type_map[chord_type] - 1 do
-                    local candidate_notes = get_chord_notes(key, chord_type, 4 + octave_adjustment, inversion)
-                    local blending = evaluate_inversion_blending(prev_notes, candidate_notes)
+                    local candidate_notes = get_chord_notes(key, chord_type, octave + octave_adjustment, inversion)
+                    local blending = evaluate_inversion_blending(previous_chord_notes, candidate_notes)
                     if blending > 0 then
                         print("Candidate notes, inversion " .. tostring(inversion) .. " blending " .. blending .. " octave adjustment " .. tostring(octave_adjustment), print_table(candidate_notes))
                         -- Save this inversion
                         local inversion_obj = {
                             inversion = inversion,
                             blending = blending,
-                            octave_adjustment = octave_adjustment
+                            octave_adjustment = octave_adjustment,
+                            chord_notes = candidate_notes
                         }
                         table.insert(all_inversions, inversion_obj)
                     end
@@ -253,15 +256,23 @@ function factory ()
             min_blending = all_inversions[inversion_index].blending
 
             print("Chosen is inversion with index " .. inversion_index .. " inversion " .. tostring(best_inversion) .. " with blending ", min_blending, " and octave adjustment " .. tostring(best_octave_adjustment))
-            return best_inversion, best_octave_adjustment
+            return best_inversion, best_octave_adjustment, all_inversions[inversion_index].chord_notes
         else
-            -- Default inversion if no previous chord
-            return math.random(0, #chord_type_map[chord_type] - 1), 0
+            -- Random inversion if no previous chord
+            local inversion = math.random(0, #chord_type_map[chord_type] - 1)
+            return inversion, 0,
+                get_chord_notes(key, chord_type, octave, inversion)
         end
     end
 
     -- Function to optimize chord for playability by limiting notes and hand span
-    function optimize_chord(notes, root_note, max_notes_per_hand, max_hand_span, priority_intervals)
+    function optimize_chord(chord_notes, root_note, max_notes_per_hand, max_hand_span, priority_intervals)
+
+        -- Create a copy of the chord notes
+        local notes = {}
+        for i, note in ipairs(chord_notes) do
+            table.insert(notes, note)
+        end
         -- Ensure the notes are sorted
         table.sort(notes)
 
@@ -351,28 +362,13 @@ function factory ()
     end
 
     -- Function to add a chord at a given marker position
-    function add_chord_to_midi(midiCommand, channel, chord_str,
-                               hand_inversion, hand_octave, position, duration,
-                               max_notes_per_hand, max_hand_span, priority_intervals, velocity)
-
-        print("add_chord_to_midi", midiCommand, channel, chord_str,
-                hand_inversion, hand_octave, position, duration,
-                max_notes_per_hand, max_hand_span, priority_intervals, velocity)
-
-        local key, chord_type = parse_chord(chord_str)
-
-        -- Get chord notes for both hands
-        local hand_notes = get_chord_notes(key, chord_type, hand_octave, hand_inversion)
-
-        -- Optimize the chord notes for playability
-        hand_notes = optimize_chord(hand_notes, note_map[key], max_notes_per_hand, max_hand_span, priority_intervals)
+    function add_chord_to_midi(midiCommand, channel, position, duration, velocity, hand_notes)
 
         -- Add MIDI notes to the region
         for _, note in ipairs(hand_notes) do
             add_midi_note_to_region(midiCommand, channel, note, velocity, position, duration)
         end
 
-        return hand_notes
     end
 
     function add_midi_note_to_region(midiCommand, channel, note_pitch, note_velocity, start_time, duration)
@@ -492,34 +488,38 @@ function factory ()
 
             -- Skip breaks
             if chord_prefix ~= "#" then
-                local inversion, octave_adjustment, octave
+                local inversion, octave_adjustment, octave, chord_notes
                 if chord_prefix == "*" then
                     -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
-                    inversion, octave_adjustment = previous_inversion, previous_octave_adjustment
+                    inversion, octave_adjustment, chord_notes = previous_inversion, previous_octave_adjustment, previous_chord_notes
                 else
-                    inversion, octave_adjustment = choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment)
+                    inversion, octave_adjustment, chord_notes =
+                        choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config.octave)
                 end
-                octave = hand_config.octave + octave_adjustment
-                -- Add chord to MIDI for the current hand
-                -- Note position needs to be adjusted with region::start()
-                -- (if region start boundary was moved after region was created or extended)
-                local chord_notes = add_chord_to_midi(midiCommand, hand_config.channel, chord_str, inversion, octave,
+
+                -- Optimize the chord notes for playability
+                local key = parse_chord(chord_str)
+                -- optimize_chord(notes, root_note, max_notes_per_hand, max_hand_span, priority_intervals)
+                local optimized_chord_notes = optimize_chord(chord_notes, note_map[key], hand_config.notes_per_hand, hand_config.hand_span, hand_config.priority_intervals)
+
+                add_chord_to_midi(midiCommand, hand_config.channel,
                         start_time + midi_region:start():beats(), duration,
-                        hand_config.notes_per_hand,
-                        hand_config.hand_span,
-                        hand_config.priority_intervals,
-                        hand_config.velocity)
+                        hand_config.velocity, optimized_chord_notes)
 
                 print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
                         " for hand ", hand, " inversion ", inversion, " hand octave ", hand_config.octave,
                         " octave adjustment ", octave_adjustment,
                         " chord_notes ", print_table(chord_notes))
 
+                -- Add generated chord notes to the marker object
+                marker.chord_notes = optimized_chord_notes
+
                 -- Update previous settings based on hand
                 previous_inversion = inversion
                 previous_octave_adjustment = octave_adjustment
                 -- Save current chord string and notes for the next iteration
                 previous_chord_str = chord_str
+                -- Remember chord notes before they were optimized
                 previous_chord_notes = chord_notes
 
             end
