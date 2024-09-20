@@ -210,7 +210,7 @@ function factory ()
     end
 
     -- Function to choose the best inversion based on the previous chord
-    function choose_inversion(chord_str, previous_inversion, previous_chord, previous_octave_adjustment, previous_chord_notes, octave)
+    function choose_inversion_1(chord_str, previous_inversion, previous_chord, previous_octave_adjustment, previous_chord_notes, octave)
         local key, chord_type = parse_chord(chord_str)
 
         print("Choosing inversion for ", chord_str, " previous chord ", previous_chord, " inversion ", previous_inversion, " octave adjustment ", previous_octave_adjustment)
@@ -493,8 +493,11 @@ function factory ()
                     -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
                     inversion, octave_adjustment, chord_notes = previous_inversion, previous_octave_adjustment, previous_chord_notes
                 else
+                    print("Calling inversion algorithm ", hand_config.inversion_alg, " with parameters ", chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, print_table(previous_chord_notes), hand_config.octave)
+                    local choose_inversion = inversion_algorithms[hand_config.inversion_alg]
                     inversion, octave_adjustment, chord_notes =
                         choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config.octave)
+                    print("Inversion algorithm returned ", inversion, octave_adjustment, print_table(chord_notes))
                 end
 
                 -- Optimize the chord notes for playability
@@ -539,7 +542,8 @@ function factory ()
             velocity = get_config_values("velocity", _velocity)[hand],
             note_gap = get_config_values("note_gap", _note_gap)[hand],
             pattern = get_config_values("pattern", _pattern)[hand],
-            priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand]
+            priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand],
+            inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand]
         }
     end
 
@@ -552,12 +556,148 @@ function factory ()
     _velocity = {64, 64}
     _note_gap = {0, 0}
     _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
+    _inversion_algorithm = {1,1}
     -- Define priority intervals per hand
     _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
     ticks_per_beat = 1920.0
 
+    inversion_algorithms = {
+        choose_inversion_1,
+        choose_inversion_2
+    }
+
+    -- New inversion algorithm, ideas from Claude
+    -- Function to choose the best inversion with voice leading
+    function choose_inversion_2(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, octave)
+        if not chord_str or not octave then
+            print("Error: Missing required parameters chord_str or octave")
+            return nil, nil, {}
+        end
+
+        local key, chord_type = parse_chord(chord_str)
+        if not key or not chord_type then
+            print("Error: Invalid chord string: " .. chord_str)
+            return nil, nil, {}
+        end
+
+        -- Generate all possible inversions
+        local possible_inversions = {}
+        local base_notes = get_chord_notes(key, chord_type, octave, 0)
+
+        if not base_notes or #base_notes == 0 then
+            print("Error: No notes generated for chord: " .. chord_str)
+            return nil, nil, {}
+        end
+
+        local num_inversions = #base_notes
+
+        for inv = 0, num_inversions - 1 do
+            local notes = get_chord_notes(key, chord_type, octave, inv)
+            if notes and #notes > 0 then
+                table.insert(possible_inversions, {inversion = inv, octave_adjustment = 0, notes = notes})
+
+                -- Also consider the same inversion in adjacent octaves
+                table.insert(possible_inversions, {inversion = inv, octave_adjustment = 1, notes = transpose_notes(notes, 12)})
+                table.insert(possible_inversions, {inversion = inv, octave_adjustment = -1, notes = transpose_notes(notes, -12)})
+            end
+        end
+
+        if #possible_inversions == 0 then
+            print("Error: No valid inversions generated for chord: " .. chord_str)
+            return nil, nil, {}
+        end
+
+        -- If there's no previous chord, choose a random inversion
+        if not previous_chord_notes or #previous_chord_notes == 0 then
+            print("Using a random inversion since there is no previous chord")
+            math.randomseed(os.time()) -- Seed the random number generator
+            local random_index = math.random(#possible_inversions)
+            return possible_inversions[random_index].inversion,
+            possible_inversions[random_index].octave_adjustment,
+            possible_inversions[random_index].notes
+        end
+
+        -- If there's a previous chord, apply voice leading rules
+        table.sort(possible_inversions, function(a, b)
+            return voice_leading_score(previous_chord_notes, a.notes) < voice_leading_score(previous_chord_notes, b.notes)
+        end)
+
+        -- Avoid repeating the same inversion if the chord hasn't changed
+        if chord_str == previous_chord_str then
+            local valid_inversions = {}
+            for i, inv in ipairs(possible_inversions) do
+                if inv.inversion ~= previous_inversion then
+                    table.insert(valid_inversions, inv)
+                end
+            end
+
+            if #valid_inversions == 0 then
+                -- If all inversions are the same as the previous, just use the first one
+                return possible_inversions[1].inversion,
+                possible_inversions[1].octave_adjustment,
+                possible_inversions[1].notes
+            end
+
+            -- Choose a random inversion from the valid ones, with preference for better voice leading
+            local num_choices = math.min(2, #valid_inversions)
+            local chosen_index = math.random(num_choices)
+            return valid_inversions[chosen_index].inversion,
+            valid_inversions[chosen_index].octave_adjustment,
+            valid_inversions[chosen_index].notes
+        end
+
+        -- Return the best inversion
+        return possible_inversions[1].inversion,
+        possible_inversions[1].octave_adjustment,
+        possible_inversions[1].notes
+    end
+
+    -- Helper function to calculate voice leading score (lower is better)
+    function voice_leading_score(prev_notes, new_notes)
+        local score = 0
+        for i = 1, math.min(#prev_notes, #new_notes) do
+            if prev_notes[i] and new_notes[i] then
+                local interval = math.abs(new_notes[i] - prev_notes[i])
+                score = score + interval
+
+                -- Penalize parallel fifths and octaves
+                if i < math.min(#prev_notes, #new_notes) then
+                    if prev_notes[i+1] and new_notes[i+1] then
+                        local prev_interval = math.abs(prev_notes[i+1] - prev_notes[i]) % 12
+                        local new_interval = math.abs(new_notes[i+1] - new_notes[i]) % 12
+                        if (prev_interval == 7 or prev_interval == 0) and prev_interval == new_interval then
+                            score = score + 100  -- Heavy penalty for parallel fifths/octaves
+                        end
+                    end
+                end
+            end
+        end
+        return score
+    end
+
+    -- Helper function to transpose notes
+    function transpose_notes(notes, semitones)
+        local transposed = {}
+        for i, note in ipairs(notes) do
+            transposed[i] = note + semitones
+        end
+        return transposed
+    end
+
+    -- Debug function to print chord information
+    function debug_print_chord(chord_str, inversion, octave_adjustment, notes)
+        print("Chord: " .. chord_str)
+        print("Inversion: " .. inversion)
+        print("Octave Adjustment: " .. octave_adjustment)
+        print("Notes: " .. table.concat(notes, ", "))
+        print("---")
+    end
+    -- end new inversion algorithm
+
     return function()
+
+        math.randomseed(os.time()) -- Seed the random number generator
 
         -- Get the selected region
         local sel = Editor:get_selection()
