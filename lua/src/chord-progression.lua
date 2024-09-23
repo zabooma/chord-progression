@@ -604,6 +604,7 @@ function factory ()
                 local notes = get_chord_notes(key, chord_type, octave + adj, inv)
                 if notes and #notes > 0 then
                     table.insert(possible_inversions, {inversion = inv, octave_adjustment = adj, notes = notes})
+                    -- print("Adding inversion ", print_table(possible_inversions[#possible_inversions]))
                 end
             end
         end
@@ -617,6 +618,7 @@ function factory ()
         if not previous_chord_notes or #previous_chord_notes == 0 then
             math.randomseed(os.time()) -- Seed the random number generator
             local random_index = math.random(#possible_inversions)
+            possible_inversions[random_index].notes = trim_chord(possible_inversions[random_index].notes, previous_chord_notes, hand_config, chord_type, key)
             return possible_inversions[random_index].inversion,
                 possible_inversions[random_index].octave_adjustment,
                 possible_inversions[random_index].notes
@@ -625,31 +627,57 @@ function factory ()
         -- Calculate voice leading scores for all inversions
         for _, inv in ipairs(possible_inversions) do
             inv.score, inv.notes = evaluate_single_hand(previous_chord_notes, inv.notes, hand_config, chord_type, key)
-            print("current_notes ", print_table(inv.notes))
+            --print("current_notes ", print_table(inv))
         end
+
+        -- Inversions are now optimized for the hand and we might have duplicates
+        -- Remove duplicates
+        local unique_inversions = {}
+        local seen_note_sets = {}
+
+        for _, inv in ipairs(possible_inversions) do
+            -- Convert the notes table to a string for easy comparison
+            --inv.notes = table.sort(inv.notes)
+            local note_set = table.concat(inv.notes, ",")
+
+            if not seen_note_sets[note_set] then
+                seen_note_sets[note_set] = true
+                table.insert(unique_inversions, inv)
+            end
+        end
+
+        -- Replace possible_inversions with the unique inversions
+        possible_inversions = unique_inversions
 
         -- Sort inversions by voice leading score
         table.sort(possible_inversions, function(a, b) return a.score > b.score end)
 
+        print("Unique inversions ", print_table(possible_inversions))
+
         -- If the chord hasn't changed, we need to choose a different inversion
         if chord_str == previous_chord_str then
             -- Find the best inversion that's different from the previous one
+            local different_inv = {}
             for _, inv in ipairs(possible_inversions) do
-                if inv.inversion ~= previous_inversion or inv.octave_adjustment ~= previous_octave_adjustment then
-                    return inv.inversion, inv.octave_adjustment, inv.notes
+                local inv_note_set = table.concat(inv.notes, ",")
+                local prev_note_set = table.concat(previous_chord_notes, ",")
+                if prev_note_set ~= inv_note_set then
+                    table.insert(different_inv, inv)
+                    --return inv.inversion, inv.octave_adjustment, inv.notes
                 end
             end
             -- If we couldn't find a different inversion, use one of the best ones
-            local random_index = math.random(math.min(2, #possible_inversions))
-            return possible_inversions[random_index].inversion,
-                possible_inversions[random_index].octave_adjustment,
-                possible_inversions[random_index].notes
+            local random_index = math.random(math.min(2, #different_inv))
+            return different_inv[random_index].inversion,
+            different_inv[random_index].octave_adjustment,
+            different_inv[random_index].notes
         end
 
-        -- Return the best inversion
-        return possible_inversions[1].inversion,
-            possible_inversions[1].octave_adjustment,
-            possible_inversions[1].notes
+        -- Return one of the best inversions to give it some randomness
+        local random_index = math.random(math.min(2, #possible_inversions))
+        return possible_inversions[random_index].inversion,
+            possible_inversions[random_index].octave_adjustment,
+            possible_inversions[random_index].notes
     end
 
     -- Evaluate new inversions based on previous chord notes and hand parameters
@@ -714,7 +742,7 @@ function factory ()
         -- Penalize very large total movements (adjusted for style and hand)
         local movement_threshold = max_movement * #prev_notes
         if style == "jazz" then movement_threshold = movement_threshold * 1.5 end
-        if hand == "left" then movement_threshold = movement_threshold * 0.8 end
+        if hand == 1 then movement_threshold = movement_threshold * 0.8 end
         if total_movement > movement_threshold then
             total_score = total_score - (total_movement - movement_threshold)
         end
@@ -725,6 +753,7 @@ function factory ()
         end
 
         --print("Returning ", total_score, print_table(current_notes))
+        table.sort(current_notes)
         return total_score, current_notes
     end
 
@@ -738,7 +767,7 @@ function factory ()
 
         local root = note_map[key]
         local note_weights = {}
-        local priority_notes = get_priority_notes(chord_type, root, hand_config.hand)
+        local priority_notes = get_priority_notes(chord_type, root, hand_config)
 
         -- Assign weights to notes
         for _, note in ipairs(notes) do
@@ -769,51 +798,44 @@ function factory ()
         return {table.unpack(notes, 1, hand_config.notes_per_hand)}
     end
 
-    function get_priority_notes(chord_quality, root, hand)
-        local priorities = {}
+    function get_priority_notes(chord_quality, root, hand_config)
+        local intervals = chord_type_map[chord_quality]
+        if not intervals then
+            print("Error: Unknown chord quality: " .. chord_quality)
+            return {}
+        end
 
-        if hand == 1 then
-            -- Left hand priorities focus on bass notes
-            table.insert(priorities, root)
-            table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
-            if chord_quality == "7" or chord_quality == "maj7" or chord_quality == "m7" then
-                table.insert(priorities, (root + 10) % 12) -- Seventh
-            end
-            table.insert(priorities, (root + 3) % 12)  -- Third (major or minor)
-            table.insert(priorities, (root + 4) % 12)  -- Major third (in case of major chord)
-        else
-            -- Right hand priorities focus on chord character
-            if chord_quality == "major" then
-                table.insert(priorities, (root + 4) % 12)  -- Major third
-                table.insert(priorities, root)
-                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
-            elseif chord_quality == "m" then
-                table.insert(priorities, (root + 3) % 12)  -- Minor third
-                table.insert(priorities, root)
-                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
-            elseif chord_quality == "7" then
-                table.insert(priorities, (root + 10) % 12) -- Minor seventh
-                table.insert(priorities, (root + 4) % 12)  -- Major third
-                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
-                table.insert(priorities, root)
-            elseif chord_quality == "dim" then
-                table.insert(priorities, (root + 3) % 12)  -- Minor third
-                table.insert(priorities, (root + 6) % 12)  -- Diminished fifth
-                table.insert(priorities, (root + 9) % 12)  -- Diminished seventh
-                table.insert(priorities, root)
-            elseif chord_quality == "aug" then
-                table.insert(priorities, (root + 4) % 12)  -- Major third
-                table.insert(priorities, (root + 8) % 12)  -- Augmented fifth
-                table.insert(priorities, root)
-            elseif chord_quality == "sus4" then
-                table.insert(priorities, (root + 5) % 12)  -- Perfect fourth
-                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
-                table.insert(priorities, root)
-                -- Add more chord qualities as needed
+        local notes = {}
+        for _, interval in ipairs(intervals) do
+            table.insert(notes, (root + interval) % 12)
+        end
+
+        -- Remove duplicates
+        local unique_notes = {}
+        for _, v in ipairs(notes) do
+            if not table.contains(unique_notes, v) then
+                table.insert(unique_notes, v)
             end
         end
 
-        return priorities
+        -- Sort notes
+        --table.sort(unique_notes)
+
+        -- Select notes based on hand
+        local priority_notes = {}
+        if hand_config.hand == 1 then  -- Left hand
+            for i = 1, math.min(#unique_notes, hand_config.notes_per_hand) do
+                table.insert(priority_notes, unique_notes[i])
+            end
+        else  -- Right hand
+            for i = math.max(1, #unique_notes - hand_config.notes_per_hand + 1), #unique_notes do
+                table.insert(priority_notes, unique_notes[i])
+            end
+        end
+
+        -- Sort priority notes before returning them
+        table.sort(priority_notes)
+        return priority_notes
     end
 
     function is_ergonomic_position(notes, hand_config)
