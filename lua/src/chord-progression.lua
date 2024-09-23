@@ -210,8 +210,10 @@ function factory ()
     end
 
     -- Function to choose the best inversion based on the previous chord
-    function choose_inversion_1(chord_str, previous_inversion, previous_chord, previous_octave_adjustment, previous_chord_notes, octave)
+    function choose_inversion_1(chord_str, previous_inversion, previous_chord, previous_octave_adjustment, previous_chord_notes, hand_config)
+
         local key, chord_type = parse_chord(chord_str)
+        local octave = hand_config.octave
 
         print("Choosing inversion for ", chord_str, " previous chord ", previous_chord, " inversion ", previous_inversion, " octave adjustment ", previous_octave_adjustment)
 
@@ -492,10 +494,10 @@ function factory ()
                     -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
                     inversion, octave_adjustment, chord_notes = previous_inversion, previous_octave_adjustment, previous_chord_notes
                 else
-                    print("Calling inversion algorithm ", hand_config.inversion_alg, " with parameters ", chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, print_table(previous_chord_notes), hand_config.octave)
+                    print("Calling inversion algorithm ", hand_config.inversion_alg, " with parameters ", chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, print_table(previous_chord_notes), print_table(hand_config))
                     local choose_inversion = inversion_algorithms[hand_config.inversion_alg]
                     inversion, octave_adjustment, chord_notes =
-                        choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config.octave)
+                        choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config)
                     print("Inversion algorithm returned ", inversion, octave_adjustment, print_table(chord_notes))
                 end
 
@@ -533,6 +535,7 @@ function factory ()
     -- Function to retrieve config values for both hands
     function get_hand_config(hand)
         return {
+            hand = hand,
             octave = get_config_values("octave", _hand_octave)[hand],
             hand_span = get_config_values("hand_span", _max_hand_span)[hand],
             notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)[hand],
@@ -542,7 +545,8 @@ function factory ()
             note_gap = get_config_values("note_gap", _note_gap)[hand],
             pattern = get_config_values("pattern", _pattern)[hand],
             priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand],
-            inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand]
+            inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand],
+            style = get_config_values("style", _style)[hand]
         }
     end
 
@@ -556,6 +560,7 @@ function factory ()
     _note_gap = {0, 0}
     _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
     _inversion_algorithm = {1,1}
+    _style = {"jazz", "jazz"}
     -- Define priority intervals per hand
     _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
@@ -568,7 +573,10 @@ function factory ()
 
     -- New inversion algorithm, ideas from Claude
     -- Function to choose the best inversion with voice leading
-    function choose_inversion_2(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, octave)
+    function choose_inversion_2(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config)
+
+        local octave = hand_config.octave
+
         if not chord_str or not octave then
             print("Error: Missing required parameters chord_str or octave")
             return nil, nil, {}
@@ -616,11 +624,12 @@ function factory ()
 
         -- Calculate voice leading scores for all inversions
         for _, inv in ipairs(possible_inversions) do
-            inv.score = voice_leading_score(previous_chord_notes, inv.notes)
+            inv.score, inv.notes = evaluate_single_hand(previous_chord_notes, inv.notes, hand_config, chord_type, key)
+            print("current_notes ", print_table(inv.notes))
         end
 
         -- Sort inversions by voice leading score
-        table.sort(possible_inversions, function(a, b) return a.score < b.score end)
+        table.sort(possible_inversions, function(a, b) return a.score > b.score end)
 
         -- If the chord hasn't changed, we need to choose a different inversion
         if chord_str == previous_chord_str then
@@ -643,45 +652,185 @@ function factory ()
             possible_inversions[1].notes
     end
 
-    -- Helper function to calculate voice leading score (lower is better)
-    function voice_leading_score(prev_notes, new_notes)
-        local score = 0
-        for i = 1, math.min(#prev_notes, #new_notes) do
-            if prev_notes[i] and new_notes[i] then
-                local interval = math.abs(new_notes[i] - prev_notes[i])
-                score = score + interval -- * interval  -- Square the interval to penalize larger jumps more heavily
+    -- Evaluate new inversions based on previous chord notes and hand parameters
+    function evaluate_single_hand(prev_notes, current_notes, hand_config, chord_type, key)
+
+        --print("evaluate_single_hand ", print_table(prev_notes), print_table(current_notes), print_table(hand_config), chord_type, key)
+
+        table.sort(prev_notes)
+        table.sort(current_notes)
+
+        local hand = hand_config.hand
+        local style = hand_config.style
+        local total_score = 0
+        local max_movement = 12
+
+        -- Intelligent note removal
+        current_notes = trim_chord(current_notes, prev_notes, hand_config, chord_type, key)
+        --print("trim_chord returned ", print_table(current_notes))
+
+        -- Calculate common notes
+        local common_notes = 0
+        for _, note in ipairs(prev_notes) do
+            if table.contains(current_notes, note) then
+                common_notes = common_notes + 1
             end
         end
-        return score
+
+        -- Evaluate note movements
+        local total_movement = 0
+        local largest_movement = 0
+        for i = 1, math.min(#prev_notes, #current_notes) do
+            local difference = math.abs(current_notes[i] - prev_notes[i])
+            total_movement = total_movement + difference
+            largest_movement = math.max(largest_movement, difference)
+
+            -- Reward smaller movements
+            total_score = total_score + (max_movement - difference)
+        end
+
+        -- Reward common notes
+        total_score = total_score + (common_notes * 10)
+
+        -- Evaluate range
+        local prev_range = prev_notes[#prev_notes] - prev_notes[1]
+        local current_range = current_notes[#current_notes] - current_notes[1]
+        local range_difference = math.abs(current_range - prev_range)
+
+        -- Style-specific scoring
+        if style == "classical" then
+            total_score = total_score + (12 - range_difference) * 3
+            total_score = total_score - largest_movement * 2
+        elseif style == "jazz" then
+            total_score = total_score + (24 - range_difference)
+            if current_range > 12 then
+                total_score = total_score + 10
+            end
+        elseif style == "pop" then
+            total_score = total_score + (12 - range_difference) * 2
+            total_score = total_score + (common_notes * 5)
+        end
+
+        -- Penalize very large total movements (adjusted for style and hand)
+        local movement_threshold = max_movement * #prev_notes
+        if style == "jazz" then movement_threshold = movement_threshold * 1.5 end
+        if hand == "left" then movement_threshold = movement_threshold * 0.8 end
+        if total_movement > movement_threshold then
+            total_score = total_score - (total_movement - movement_threshold)
+        end
+
+        -- Bonus for ergonomic hand positions
+        if is_ergonomic_position(current_notes, hand_config) then
+            total_score = total_score + 15
+        end
+
+        --print("Returning ", total_score, print_table(current_notes))
+        return total_score, current_notes
     end
 
-    function voice_leading_scoreX(prev_notes, new_notes)
-        local score = 0
-        for i = 1, math.min(#prev_notes, #new_notes) do
-            local interval = math.abs(new_notes[i] - prev_notes[i])
-            score = score + interval
+    function trim_chord(notes, prev_notes, hand_config, chord_type, key)
 
-            -- Penalize parallel fifths and octaves
-            if i < #prev_notes then
-                local prev_interval = math.abs(prev_notes[i+1] - prev_notes[i]) % 12
-                local new_interval = math.abs(new_notes[i+1] - new_notes[i]) % 12
-                if (prev_interval == 7 or prev_interval == 0) and prev_interval == new_interval then
-                    score = score + 100  -- Heavy penalty for parallel fifths/octaves
+        --print("trim_chord ", print_table(notes), print_table(prev_notes), print_table(hand_config), chord_type, key)
+
+        if #notes <= hand_config.notes_per_hand then
+            return notes
+        end
+
+        local root = note_map[key]
+        local note_weights = {}
+        local priority_notes = get_priority_notes(chord_type, root, hand_config.hand)
+
+        -- Assign weights to notes
+        for _, note in ipairs(notes) do
+            local weight = 0
+            -- Priority notes from chord quality
+            for i, priority_note in ipairs(priority_notes) do
+                if note % 12 == priority_note then
+                    weight = weight + (5 - i) * 10  -- Higher weight for more important chord tones
                 end
             end
+            -- Common notes with previous chord
+            if table.contains(prev_notes, note) then
+                weight = weight + 15
+            end
+            -- Prefer lower notes for left hand, higher notes for right hand
+            if hand_config.hand == 1 then
+                weight = weight + (127 - note)
+            else
+                weight = weight + note
+            end
+            note_weights[note] = weight
         end
-        return score
+
+        -- Sort notes by weight
+        table.sort(notes, function(a, b) return note_weights[a] > note_weights[b] end)
+
+        -- Keep the top max_notes
+        return {table.unpack(notes, 1, hand_config.notes_per_hand)}
     end
 
-    -- Debug function to print chord information
-    function debug_print_chord(chord_str, inversion, octave_adjustment, notes)
-        print("Chord: " .. chord_str)
-        print("Inversion: " .. inversion)
-        print("Octave Adjustment: " .. octave_adjustment)
-        print("Notes: " .. table.concat(notes, ", "))
-        print("---")
+    function get_priority_notes(chord_quality, root, hand)
+        local priorities = {}
+
+        if hand == 1 then
+            -- Left hand priorities focus on bass notes
+            table.insert(priorities, root)
+            table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
+            if chord_quality == "7" or chord_quality == "maj7" or chord_quality == "m7" then
+                table.insert(priorities, (root + 10) % 12) -- Seventh
+            end
+            table.insert(priorities, (root + 3) % 12)  -- Third (major or minor)
+            table.insert(priorities, (root + 4) % 12)  -- Major third (in case of major chord)
+        else
+            -- Right hand priorities focus on chord character
+            if chord_quality == "major" then
+                table.insert(priorities, (root + 4) % 12)  -- Major third
+                table.insert(priorities, root)
+                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
+            elseif chord_quality == "m" then
+                table.insert(priorities, (root + 3) % 12)  -- Minor third
+                table.insert(priorities, root)
+                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
+            elseif chord_quality == "7" then
+                table.insert(priorities, (root + 10) % 12) -- Minor seventh
+                table.insert(priorities, (root + 4) % 12)  -- Major third
+                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
+                table.insert(priorities, root)
+            elseif chord_quality == "dim" then
+                table.insert(priorities, (root + 3) % 12)  -- Minor third
+                table.insert(priorities, (root + 6) % 12)  -- Diminished fifth
+                table.insert(priorities, (root + 9) % 12)  -- Diminished seventh
+                table.insert(priorities, root)
+            elseif chord_quality == "aug" then
+                table.insert(priorities, (root + 4) % 12)  -- Major third
+                table.insert(priorities, (root + 8) % 12)  -- Augmented fifth
+                table.insert(priorities, root)
+            elseif chord_quality == "sus4" then
+                table.insert(priorities, (root + 5) % 12)  -- Perfect fourth
+                table.insert(priorities, (root + 7) % 12)  -- Perfect fifth
+                table.insert(priorities, root)
+                -- Add more chord qualities as needed
+            end
+        end
+
+        return priorities
     end
-    -- end new inversion algorithm
+
+    function is_ergonomic_position(notes, hand_config)
+        local range = notes[#notes] - notes[1]
+        return range <= hand_config.hand_span
+    end
+
+    function table.contains(table, element)
+        for _, value in pairs(table) do
+            if value == element then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- end new inversion algorithm 2
 
     return function()
 
