@@ -616,12 +616,19 @@ function factory ()
 
         -- If there's no previous chord, choose a random inversion
         if not previous_chord_notes or #previous_chord_notes == 0 then
+            -- We want to start with the inversion that has root note in the selected octave
+            local start_inversions = {}
+            for _, inv in ipairs(possible_inversions) do
+                if (inv.inv == 0 and inv.octave_adjustment == 0) or (inv.inv ~= 0 and inv.octave_adjustment == -1) then
+                    table.insert(start_inversions, inv)
+                end
+            end
             math.randomseed(os.time()) -- Seed the random number generator
-            local random_index = math.random(#possible_inversions)
-            possible_inversions[random_index].notes = trim_chord(possible_inversions[random_index].notes, previous_chord_notes, hand_config, chord_type, key)
-            return possible_inversions[random_index].inversion,
-                possible_inversions[random_index].octave_adjustment,
-                possible_inversions[random_index].notes
+            local random_index = math.random(#start_inversions)
+            start_inversions[random_index].notes = trim_chord(start_inversions[random_index].notes, previous_chord_notes, hand_config, chord_type, key)
+            return start_inversions[random_index].inversion,
+                start_inversions[random_index].octave_adjustment,
+                start_inversions[random_index].notes
         end
 
         -- Calculate voice leading scores for all inversions
