@@ -546,7 +546,8 @@ function factory ()
             pattern = get_config_values("pattern", _pattern)[hand],
             priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand],
             inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand],
-            style = get_config_values("style", _style)[hand]
+            style = get_config_values("style", _style)[hand],
+            octave_drift = get_config_values("octave_drift", _octave_drift)[hand]
         }
     end
 
@@ -559,8 +560,9 @@ function factory ()
     _velocity = {64, 64}
     _note_gap = {0, 0}
     _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
-    _inversion_algorithm = {1,1}
+    _inversion_algorithm = {1, 1}
     _style = {"jazz", "jazz"}
+    _octave_drift = {1, 1}
     -- Define priority intervals per hand
     _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
 
@@ -626,6 +628,7 @@ function factory ()
             math.randomseed(os.time()) -- Seed the random number generator
             local random_index = math.random(#start_inversions)
             start_inversions[random_index].notes = trim_chord(start_inversions[random_index].notes, previous_chord_notes, hand_config, chord_type, key)
+            print("trim_chord returned ", print_table(start_inversions[random_index].notes))
             return start_inversions[random_index].inversion,
                 start_inversions[random_index].octave_adjustment,
                 start_inversions[random_index].notes
@@ -675,6 +678,7 @@ function factory ()
             end
             -- If we couldn't find a different inversion, use one of the best ones
             local random_index = math.random(math.min(2, #different_inv))
+            print("Selecting inversion ", random_index, " from ", print_table(different_inv))
             return different_inv[random_index].inversion,
             different_inv[random_index].octave_adjustment,
             different_inv[random_index].notes
@@ -761,6 +765,20 @@ function factory ()
 
         --print("Returning ", total_score, print_table(current_notes))
         table.sort(current_notes)
+
+        -- Add penalty for lowest note outside of allowed range
+        local base_octave = hand_config.octave * 12  -- Convert octave to MIDI note number
+        local lower_bound = base_octave - (hand_config.octave_drift * 12)  -- Lower bound in MIDI note numbers
+        local upper_bound = base_octave + (hand_config.octave_drift * 12)  -- Upper bound in MIDI note numbers
+
+        local lowest_note = current_notes[1]  -- Assuming current_notes is sorted
+
+        if lowest_note < lower_bound or lowest_note > upper_bound then
+            local distance_from_range = math.min(math.abs(lowest_note - lower_bound), math.abs(lowest_note - upper_bound))
+            local octaves_out_of_range = math.floor(distance_from_range / 12)
+            total_score = total_score - (octaves_out_of_range * 20)  -- Penalty per octave out of range
+        end
+
         return total_score, current_notes
     end
 
@@ -802,7 +820,12 @@ function factory ()
         table.sort(notes, function(a, b) return note_weights[a] > note_weights[b] end)
 
         -- Keep the top max_notes
-        return {table.unpack(notes, 1, hand_config.notes_per_hand)}
+        notes = {table.unpack(notes, 1, hand_config.notes_per_hand)}
+
+        -- Now sort notes back in the ascending order
+        table.sort(notes)
+
+        return notes
     end
 
     function get_priority_notes(chord_quality, root, hand_config)
