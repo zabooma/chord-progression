@@ -408,7 +408,6 @@ function factory ()
         return result
     end
 
-
     -- Global variable for the chord_progression_config. It is set for each of the regions being processed
     chord_progression_config = nil
 
@@ -593,13 +592,11 @@ function factory ()
         local num_inversions = #base_notes
 
         for inv = 0, num_inversions - 1 do
-            local notes = get_chord_notes(key, chord_type, octave, inv)
-            if notes and #notes > 0 then
-                table.insert(possible_inversions, {inversion = inv, octave_adjustment = 0, notes = notes})
-
-                -- Also consider the same inversion in adjacent octaves
-                table.insert(possible_inversions, {inversion = inv, octave_adjustment = 1, notes = transpose_notes(notes, 12)})
-                table.insert(possible_inversions, {inversion = inv, octave_adjustment = -1, notes = transpose_notes(notes, -12)})
+            for adj = -1, 1 do
+                local notes = get_chord_notes(key, chord_type, octave + adj, inv)
+                if notes and #notes > 0 then
+                    table.insert(possible_inversions, {inversion = inv, octave_adjustment = adj, notes = notes})
+                end
             end
         end
 
@@ -610,47 +607,40 @@ function factory ()
 
         -- If there's no previous chord, choose a random inversion
         if not previous_chord_notes or #previous_chord_notes == 0 then
-            print("Using a random inversion since there is no previous chord")
             math.randomseed(os.time()) -- Seed the random number generator
             local random_index = math.random(#possible_inversions)
             return possible_inversions[random_index].inversion,
-            possible_inversions[random_index].octave_adjustment,
-            possible_inversions[random_index].notes
+                possible_inversions[random_index].octave_adjustment,
+                possible_inversions[random_index].notes
         end
 
-        -- If there's a previous chord, apply voice leading rules
-        table.sort(possible_inversions, function(a, b)
-            return voice_leading_score(previous_chord_notes, a.notes) < voice_leading_score(previous_chord_notes, b.notes)
-        end)
+        -- Calculate voice leading scores for all inversions
+        for _, inv in ipairs(possible_inversions) do
+            inv.score = voice_leading_score(previous_chord_notes, inv.notes)
+        end
 
-        -- Avoid repeating the same inversion if the chord hasn't changed
+        -- Sort inversions by voice leading score
+        table.sort(possible_inversions, function(a, b) return a.score < b.score end)
+
+        -- If the chord hasn't changed, we need to choose a different inversion
         if chord_str == previous_chord_str then
-            local valid_inversions = {}
-            for i, inv in ipairs(possible_inversions) do
-                if inv.inversion ~= previous_inversion then
-                    table.insert(valid_inversions, inv)
+            -- Find the best inversion that's different from the previous one
+            for _, inv in ipairs(possible_inversions) do
+                if inv.inversion ~= previous_inversion or inv.octave_adjustment ~= previous_octave_adjustment then
+                    return inv.inversion, inv.octave_adjustment, inv.notes
                 end
             end
-
-            if #valid_inversions == 0 then
-                -- If all inversions are the same as the previous, just use the first one
-                return possible_inversions[1].inversion,
-                possible_inversions[1].octave_adjustment,
-                possible_inversions[1].notes
-            end
-
-            -- Choose a random inversion from the valid ones, with preference for better voice leading
-            local num_choices = math.min(2, #valid_inversions)
-            local chosen_index = math.random(num_choices)
-            return valid_inversions[chosen_index].inversion,
-            valid_inversions[chosen_index].octave_adjustment,
-            valid_inversions[chosen_index].notes
+            -- If we couldn't find a different inversion, use one of the best ones
+            local random_index = math.random(math.min(2, #possible_inversions))
+            return possible_inversions[random_index].inversion,
+                possible_inversions[random_index].octave_adjustment,
+                possible_inversions[random_index].notes
         end
 
         -- Return the best inversion
         return possible_inversions[1].inversion,
-        possible_inversions[1].octave_adjustment,
-        possible_inversions[1].notes
+            possible_inversions[1].octave_adjustment,
+            possible_inversions[1].notes
     end
 
     -- Helper function to calculate voice leading score (lower is better)
@@ -659,30 +649,28 @@ function factory ()
         for i = 1, math.min(#prev_notes, #new_notes) do
             if prev_notes[i] and new_notes[i] then
                 local interval = math.abs(new_notes[i] - prev_notes[i])
-                score = score + interval
-
-                -- Penalize parallel fifths and octaves
-                if i < math.min(#prev_notes, #new_notes) then
-                    if prev_notes[i+1] and new_notes[i+1] then
-                        local prev_interval = math.abs(prev_notes[i+1] - prev_notes[i]) % 12
-                        local new_interval = math.abs(new_notes[i+1] - new_notes[i]) % 12
-                        if (prev_interval == 7 or prev_interval == 0) and prev_interval == new_interval then
-                            score = score + 100  -- Heavy penalty for parallel fifths/octaves
-                        end
-                    end
-                end
+                score = score + interval -- * interval  -- Square the interval to penalize larger jumps more heavily
             end
         end
         return score
     end
 
-    -- Helper function to transpose notes
-    function transpose_notes(notes, semitones)
-        local transposed = {}
-        for i, note in ipairs(notes) do
-            transposed[i] = note + semitones
+    function voice_leading_scoreX(prev_notes, new_notes)
+        local score = 0
+        for i = 1, math.min(#prev_notes, #new_notes) do
+            local interval = math.abs(new_notes[i] - prev_notes[i])
+            score = score + interval
+
+            -- Penalize parallel fifths and octaves
+            if i < #prev_notes then
+                local prev_interval = math.abs(prev_notes[i+1] - prev_notes[i]) % 12
+                local new_interval = math.abs(new_notes[i+1] - new_notes[i]) % 12
+                if (prev_interval == 7 or prev_interval == 0) and prev_interval == new_interval then
+                    score = score + 100  -- Heavy penalty for parallel fifths/octaves
+                end
+            end
         end
-        return transposed
+        return score
     end
 
     -- Debug function to print chord information
