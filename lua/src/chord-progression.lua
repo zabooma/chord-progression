@@ -174,8 +174,17 @@ function factory ()
 
     -- Function to get chord notes based on key, chord type, and inversion
     function get_chord_notes(key, chord_type, octave, inversion)
-        local root_note = note_map[key] + (octave - 4) * 12
-        local chord_intervals = chord_type_map[chord_type]
+
+        -- If we have an invalid key or chord_str return an empty list of notes
+        if not note_map[string.upper(key)] then
+            return {}
+        end
+        local root_note = note_map[string.upper(key)] + (octave - 4) * 12
+        local chord_intervals = table.getIgnoreCase(chord_type_map, chord_type)
+        if not chord_intervals then
+            return {}
+        end
+
         local chord_notes = {}
 
         -- Calculate chord notes with inversion
@@ -272,6 +281,9 @@ function factory ()
 
         -- Create a copy of the chord notes
         local notes = {}
+        if chord_notes == nil or #chord_notes == 0 then
+            return notes
+        end
         for i, note in ipairs(chord_notes) do
             table.insert(notes, note)
         end
@@ -294,7 +306,7 @@ function factory ()
         while #notes > max_notes_per_hand do
             note_removed = false  -- Reset the flag to check if any note is removed
 
-            local interval =  nil
+            local interval = nil
             for i, note in ipairs(notes) do
                 -- Convert current note to the base octave
                 note = note % 12
@@ -304,7 +316,7 @@ function factory ()
                     interval = (note - root_note)
                 end
                 print(string.format("Root note %d note %d interval %d", root_note, note, interval))
-                if not contains(priority_intervals, interval) then
+                if not table.contains(priority_intervals, interval) then
                     print("Removing non_priority note ", note)
                     table.remove(notes, i)
                     note_removed = true  -- Mark that a note was removed
@@ -314,7 +326,7 @@ function factory ()
 
             -- If no notes were removed we only have the priority notes left, remove a random note to prevent infinite loop
             if not note_removed then
-                local note =  math.random(1, #notes)
+                local note = math.random(1, #notes)
                 print("Removing priority note ", notes[note])
                 table.remove(notes, note)
             end
@@ -323,16 +335,6 @@ function factory ()
         print("Optimized chord ", print_table(notes))
 
         return notes
-    end
-
-    -- Helper function to check if a table contains a value
-    function contains(table, value)
-        for _, v in ipairs(table) do
-            if v == value then
-                return true
-            end
-        end
-        return false
     end
 
     -- Function to parse the chord string into key and chord type
@@ -352,12 +354,12 @@ function factory ()
         end
 
         -- Validate the key and chord type
-        if not note_map[key] then
-            error("Invalid key: " .. key)
+        if not note_map[string.upper(key)] then
+            print("Invalid key: " .. key)
         end
 
-        if not chord_type_map[chord_type] then
-            error("Invalid chord type: " .. chord_type)
+        if not table.getIgnoreCase(chord_type_map, chord_type) then
+            print("Invalid chord type: " .. chord_type)
         end
 
         return key, chord_type
@@ -415,9 +417,61 @@ function factory ()
 
     -- Function to get two configuration values from a table, with defaults if not present
     function get_config_values(key, default)
-        local values = chord_progression_config[key] or default
-        return values
+        -- Get value from chord_progression_config using case-insensitive key lookup
+        local values = table.getIgnoreCase(chord_progression_config, key)
+
+        -- Check if the value exists, is a table, and has exactly two elements
+        if values ~= nil and type(values) == "table" and #values == 2 then
+            -- Check if both elements in the list match the type of the default elements
+            if type(values[1]) == type(default[1]) and type(values[2]) == type(default[2]) then
+                return values
+            end
+        end
+
+        -- If any condition fails, return the default
+        return default
     end
+
+    -- Function to retrieve config values for both hands
+    function get_hand_config(hand)
+        return {
+            hand = hand,
+            octave = get_config_values("octave", _hand_octave)[hand],
+            hand_span = get_config_values("hand_span", _max_hand_span)[hand],
+            notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)[hand],
+            inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)[hand],
+            channel = get_config_values("channel", _hand_channel)[hand],
+            velocity = get_config_values("velocity", _velocity)[hand],
+            note_gap = get_config_values("note_gap", _note_gap)[hand],
+            pattern = get_config_values("pattern", _pattern)[hand],
+            priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand],
+            inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand],
+            style = get_config_values("style", _style)[hand],
+            octave_drift = get_config_values("octave_drift", _octave_drift)[hand]
+        }
+    end
+
+    -- Globals
+    _hand_octave = { 3, 5 }
+    _max_hand_span = { 13, 13 }
+    _max_notes_per_hand = { 3, 4 }
+    _inversions_per_bar = { 0, 0 } -- One inversion per chord change
+    _hand_channel = {0,0} -- Both hands go to the same channel
+    _velocity = {64, 64}
+    _note_gap = {0, 0}
+    _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
+    _inversion_algorithm = {1, 1}
+    _style = {"jazz", "jazz"}
+    _octave_drift = {1, 1}
+    -- Define priority intervals per hand
+    _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
+
+    ticks_per_beat = 1920.0
+
+    inversion_algorithms = {
+        choose_inversion_1,
+        choose_inversion_2
+    }
 
     function align_to_bar(position, num_beats_per_bar)
         -- Start with the beginning of the bar (markers before the first chord marker will be skipped later)
@@ -446,7 +500,8 @@ function factory ()
                 local marker_name = chord_marker
                 local new_marker = {
                     name = marker_name,
-                    time = chord_pattern_marker_time
+                    time = chord_pattern_marker_time,
+                    cnt = cnt + 1
                 }
 
                 -- Add the new marker to the inversion_change_markers table
@@ -531,47 +586,6 @@ function factory ()
         end
 
     end
-
-    -- Function to retrieve config values for both hands
-    function get_hand_config(hand)
-        return {
-            hand = hand,
-            octave = get_config_values("octave", _hand_octave)[hand],
-            hand_span = get_config_values("hand_span", _max_hand_span)[hand],
-            notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)[hand],
-            inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)[hand],
-            channel = get_config_values("channel", _hand_channel)[hand],
-            velocity = get_config_values("velocity", _velocity)[hand],
-            note_gap = get_config_values("note_gap", _note_gap)[hand],
-            pattern = get_config_values("pattern", _pattern)[hand],
-            priority_intervals = get_config_values("priority_intervals", _priority_intervals)[hand],
-            inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand],
-            style = get_config_values("style", _style)[hand],
-            octave_drift = get_config_values("octave_drift", _octave_drift)[hand]
-        }
-    end
-
-    -- Globals
-    _hand_octave = { 3, 5 }
-    _max_hand_span = { 13, 13 }
-    _max_notes_per_hand = { 3, 4 }
-    _inversions_per_bar = { 0, 0 } -- One inversion per chord change
-    _hand_channel = {0,0} -- Both hands go to the same channel
-    _velocity = {64, 64}
-    _note_gap = {0, 0}
-    _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
-    _inversion_algorithm = {1, 1}
-    _style = {"jazz", "jazz"}
-    _octave_drift = {1, 1}
-    -- Define priority intervals per hand
-    _priority_intervals = {{0,7,3,4},{0, 3, 4, 10, 11}}
-
-    ticks_per_beat = 1920.0
-
-    inversion_algorithms = {
-        choose_inversion_1,
-        choose_inversion_2
-    }
 
     -- New inversion algorithm, ideas from Claude
     -- Function to choose the best inversion with voice leading
@@ -882,6 +896,16 @@ function factory ()
         return false
     end
 
+    function table.getIgnoreCase(tbl, key)
+        local lower_key = string.lower(key)
+        for k, v in pairs(tbl) do
+            if string.lower(k) == lower_key then
+                return v
+            end
+        end
+        return nil
+    end
+
     -- end new inversion algorithm 2
 
     return function()
@@ -951,7 +975,8 @@ function factory ()
                         local first_marker_time = marker:start():beats()
                         local first_marker = {
                             name = first_marker_name,
-                            time = first_marker_time
+                            time = first_marker_time,
+                            cnt = 0
                         }
                         table.insert(inversion_change_markers, first_marker)
 
@@ -1026,7 +1051,8 @@ function factory ()
                                 local marker_name = marker:name()
                                 local new_marker = {
                                     name = marker_name,
-                                    time = marker_time
+                                    time = marker_time,
+                                    cnt = 0
                                 }
 
                                 -- Add the new marker to the inversion_change_markers table
