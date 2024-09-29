@@ -246,17 +246,83 @@ function factory ()
         return key, chord_type
     end
 
-    -- Function to add a chord at a given marker position
-    function add_chord_to_midi(midiCommand, channel, position, duration, velocity, hand_notes)
+    -- Function to add a chord at a given marker positio
+    function add_chord_to_midi(midiCommand, hand_config, position, duration, marker)
 
-        -- Add MIDI notes to the region
-        for _, note in ipairs(hand_notes) do
-            add_midi_note_to_region(midiCommand, channel, note, velocity, position, duration)
+        print ("add_chord_to_midi", midiCommand, print_table(hand_config), position, duration, print_table(marker))
+
+        local channel = hand_config.channel
+        local velocity = hand_config.velocity
+        local chord_notes = marker.chord_notes
+
+        if not chord_notes or #chord_notes == 0 then
+            -- Nothing to do
+            return
+        end
+        -- Add MIDI notes to the region based on the play parameter for the hand
+
+        -- Solid chord
+        if hand_config.play == 0 then
+            print("Play solid chord")
+            for _, note in ipairs(chord_notes) do
+                add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
+            end
+        end
+
+        -- Random note
+        if hand_config.play == 9 then
+            print("Play a random note from the chord")
+            local note_x = math.random(#chord_notes)
+            add_midi_note_to_region(midiCommand, chord_notes[note_x], position, duration, channel, velocity)
+        end
+
+        -- Arpeggio up
+        if hand_config.play == 1 then
+            print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
+            -- Add more notes into the chord if not enough to complete notes_per_cycle
+            -- FIXME this needs rework
+            local notes_per_cycle = hand_config.pattern / ((hand_config.octave_drift + 1))
+            if #chord_notes * (hand_config.octave_drift + 1) < notes_per_cycle then
+                local x = 0
+                while #chord_notes * (hand_config.octave_drift + 1) < notes_per_cycle do
+                    local i = (x % #chord_notes) + 1
+                    table.insert(chord_notes, chord_notes[i] + 12)
+                    x = x + 1
+                end
+                -- Remember how many notes were added to the chord
+                marker.extra_notes = x
+                print("Added ", x, " extra notes")
+            end
+            if not marker.extra_notes then
+                marker.extra_notes = 0
+            end
+            -- Move to the next octave if needed
+            -- Make sure the next note goes above the highest note in the chord
+            local octave_shift = (marker.cnt // #chord_notes) % (hand_config.octave_drift + 1)
+            local note_x
+            if octave_shift == 0 then
+                note_x = ((marker.cnt) % #chord_notes) + 1
+            else
+                note_x = ((marker.cnt + marker.extra_notes) % #chord_notes) + 1
+                -- Special case when we are on the last note
+                if marker.extra_notes > 0 and note_x == 1 then
+                    octave_shift = octave_shift + 1
+                    note_x = note_x + 1
+                end
+            end
+            local note = chord_notes[note_x] + 12 * octave_shift
+
+            print("Playing note ", note, " at index ", note_x)
+
+            -- Add note
+            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
         end
 
     end
 
-    function add_midi_note_to_region(midiCommand, channel, note_pitch, note_velocity, start_time, duration)
+    function add_midi_note_to_region(midiCommand, note_pitch, start_time, duration, channel, velocity)
+
+        -- print ("add_midi_note_to_region", midiCommand, note_pitch, start_time, duration, channel, velocity)
 
         -- Create a new note and add it to the command
         local new_note = ARDOUR.LuaAPI.new_noteptr(
@@ -264,7 +330,7 @@ function factory ()
                 start_time, -- Start time in beats
                 duration, -- Duration in beats
                 note_pitch, -- MIDI note number
-                note_velocity    -- Velocity
+                velocity    -- Velocity
         )
         midiCommand:add(new_note)
     end
@@ -327,7 +393,8 @@ function factory ()
             pattern = get_config_values("pattern", _pattern)[hand],
             inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand],
             style = get_config_values("style", _style)[hand],
-            octave_drift = get_config_values("octave_drift", _octave_drift)[hand]
+            octave_drift = get_config_values("octave_drift", _octave_drift)[hand],
+            play = get_config_values("play", _play)[hand],
         }
     end
 
@@ -343,6 +410,7 @@ function factory ()
     _inversion_algorithm = {1, 1}
     _style = {"jazz", "jazz"}
     _octave_drift = {1, 1}
+    _play = {0, 0}
 
     ticks_per_beat = 1920.0
 
@@ -378,7 +446,7 @@ function factory ()
                 local new_marker = {
                     name = marker_name,
                     time = chord_pattern_marker_time,
-                    cnt = cnt + 1
+                    cnt = cnt
                 }
 
                 -- Add the new marker to the inversion_change_markers table
@@ -425,6 +493,8 @@ function factory ()
                 if chord_prefix == "*" then
                     -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
                     inversion, octave_adjustment, chord_notes = previous_inversion, previous_octave_adjustment, previous_chord_notes
+                    -- Copy extra info from the previous chord
+                    marker.extra_notes = chord_markers[i-1].extra_notes
                 else
                     print("Calling inversion algorithm ", hand_config.inversion_alg, " with parameters ", chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, print_table(previous_chord_notes), print_table(hand_config))
                     local choose_inversion = inversion_algorithms[hand_config.inversion_alg]
@@ -433,17 +503,17 @@ function factory ()
                     print("Inversion algorithm returned ", inversion, octave_adjustment, print_table(chord_notes))
                 end
 
-                add_chord_to_midi(midiCommand, hand_config.channel,
-                        start_time + midi_region:start():beats(), duration,
-                        hand_config.velocity, chord_notes)
+                -- Add generated chord notes to the marker object
+                marker.chord_notes = chord_notes
+
+                -- Add notes for the chord based on play configuration
+                add_chord_to_midi(midiCommand, hand_config,
+                        start_time + midi_region:start():beats(), duration, marker)
 
                 print("Adding chord ", chord_str, " at ", start_time, " with duration ", duration,
                         " for hand ", hand, " inversion ", inversion, " hand octave ", hand_config.octave,
                         " octave adjustment ", octave_adjustment,
                         " chord_notes ", print_table(chord_notes))
-
-                -- Add generated chord notes to the marker object
-                marker.chord_notes = chord_notes
 
                 -- Update previous settings based on hand
                 previous_inversion = inversion
