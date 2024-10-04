@@ -246,7 +246,195 @@ function factory ()
         return key, chord_type
     end
 
-    -- Function to add a chord at a given marker positio
+    -- Create simple UP arpeggio
+    function createUpArp1(chord_notes, hand_config)
+        local notes_per_cycle = hand_config.pattern / (hand_config.octave_drift + 1)
+        if #chord_notes < notes_per_cycle then
+            local x = 0
+            while #chord_notes < notes_per_cycle do
+                local i = (x % #chord_notes) + 1
+                table.insert(chord_notes, chord_notes[i] + 12)
+                x = x + 1
+            end
+            print("Added ", x, " extra notes")
+        end
+        return chord_notes;
+    end
+
+    -- Function to extend notes based on the octave drift
+    function extendNotes(notes, octaves)
+        table.sort(notes)
+        local extended = {}
+        for octave = 0, octaves do
+            for _, note in ipairs(notes) do
+                local shiftedNote = note + octave * 12
+                if #extended == 0 or shiftedNote > extended[#extended] then
+                    table.insert(extended, shiftedNote)
+                end
+            end
+        end
+        return extended
+    end
+
+    -- Modified createUpArp2 function
+    function createUpArp2(chordNotes, hand_config)
+        local cycleNotes = hand_config.pattern
+        local maxOctaveDrift = hand_config.octave_drift
+        local acceptableOctaveDriftIncrease = hand_config.acceptable_octave_drift_increase or 1
+
+        -- Function to get factors of a number in decreasing order
+        local function getFactors(n)
+            local factors = {}
+            for i = 1, n do
+                if n % i == 0 then
+                    table.insert(factors, i)
+                end
+            end
+            table.sort(factors, function(a, b) return a > b end)
+            return factors
+        end
+
+        local factors = getFactors(cycleNotes)
+        local candidatePatterns = {}
+
+        for _, length in ipairs(factors) do
+            local minNotesNeeded = length
+
+            -- Start with the current octave drift
+            local requiredOctaveDrift = maxOctaveDrift
+            local extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
+
+            -- Extend octave drift only as much as needed
+            while #extendedNotes < minNotesNeeded and (requiredOctaveDrift - maxOctaveDrift) <= acceptableOctaveDriftIncrease do
+                requiredOctaveDrift = requiredOctaveDrift + 1
+                extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
+            end
+
+            local octaveDriftIncrease = requiredOctaveDrift - maxOctaveDrift
+
+            -- Only consider patterns with acceptable octave drift increase
+            if #extendedNotes >= minNotesNeeded and octaveDriftIncrease <= acceptableOctaveDriftIncrease then
+                table.insert(candidatePatterns, {
+                    patternLength = length,
+                    requiredOctaveDrift = requiredOctaveDrift,
+                    octaveDriftIncrease = octaveDriftIncrease,
+                    extendedNotes = extendedNotes
+                })
+            end
+        end
+
+        -- If no suitable pattern is found, use the maximum available notes within acceptable octave drift
+        if #candidatePatterns == 0 then
+            local requiredOctaveDrift = maxOctaveDrift
+            local extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
+
+            -- Extend octave drift within acceptable limits to get as many notes as possible
+            while (requiredOctaveDrift - maxOctaveDrift) <= acceptableOctaveDriftIncrease do
+                requiredOctaveDrift = requiredOctaveDrift + 1
+                extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
+            end
+
+            -- Use all available extended notes to create a pattern
+            local pattern = {}
+            for i = 1, math.min(cycleNotes, #extendedNotes) do
+                table.insert(pattern, extendedNotes[i])
+            end
+
+            -- Repeat the pattern as necessary
+            local arpeggioNotes = {}
+            local repeats = math.floor(cycleNotes / #pattern)
+            local remainingNotes = cycleNotes % #pattern
+
+            for i = 1, repeats do
+                for j = 1, #pattern do
+                    table.insert(arpeggioNotes, pattern[j])
+                end
+            end
+            for i = 1, remainingNotes do
+                table.insert(arpeggioNotes, pattern[i])
+            end
+
+            return arpeggioNotes
+        else
+            -- Sort candidate patterns by pattern length (descending), then octave drift increase (ascending)
+            table.sort(candidatePatterns, function(a, b)
+                if a.patternLength ~= b.patternLength then
+                    return a.patternLength > b.patternLength
+                else
+                    return a.octaveDriftIncrease < b.octaveDriftIncrease
+                end
+            end)
+
+            local bestPattern = candidatePatterns[1]
+            local patternLength = bestPattern.patternLength
+            local requiredOctaveDrift = bestPattern.requiredOctaveDrift
+            local extendedNotes = bestPattern.extendedNotes
+
+            -- Create the pattern
+            local pattern = {}
+            for i = 1, patternLength do
+                table.insert(pattern, extendedNotes[i])
+            end
+
+            -- Generate the arpeggio notes by repeating the pattern
+            local repeats = cycleNotes / patternLength
+            local arpeggioNotes = {}
+            for i = 1, repeats do
+                for j = 1, patternLength do
+                    table.insert(arpeggioNotes, pattern[j])
+                end
+            end
+
+            return arpeggioNotes
+        end
+    end
+
+    function convertToUpDownArpeggio(arpeggioNotes)
+        local n = #arpeggioNotes
+        local upDownArpeggio = {}
+        local peakIndex
+
+        if n % 2 == 0 then
+            -- Even number of notes
+            peakIndex = n / 2
+            -- Ascending part (up to peakIndex)
+            for i = 1, peakIndex do
+                table.insert(upDownArpeggio, arpeggioNotes[i])
+            end
+            -- Descending part (from peakIndex backward)
+            for i = peakIndex, 1, -1 do
+                table.insert(upDownArpeggio, arpeggioNotes[i])
+            end
+        else
+            -- Odd number of notes
+            peakIndex = (n + 1) / 2
+            -- Ascending part (up to peakIndex)
+            for i = 1, peakIndex do
+                table.insert(upDownArpeggio, arpeggioNotes[i])
+            end
+            -- Descending part (excluding peakIndex to avoid duplication)
+            for i = peakIndex - 1, 1, -1 do
+                table.insert(upDownArpeggio, arpeggioNotes[i])
+            end
+        end
+
+        -- Trim or extend the upDownArpeggio to match the input length
+        if #upDownArpeggio > n then
+            -- Remove extra notes from the end
+            while #upDownArpeggio > n do
+                table.remove(upDownArpeggio)
+            end
+        elseif #upDownArpeggio < n then
+            -- Append additional notes from the descending part
+            for i = 2, n - #upDownArpeggio + 1 do
+                table.insert(upDownArpeggio, arpeggioNotes[i])
+            end
+        end
+
+        return upDownArpeggio
+    end
+
+    -- Function to add a chord at a given marker position
     function add_chord_to_midi(midiCommand, hand_config, position, duration, marker)
 
         print ("add_chord_to_midi", midiCommand, print_table(hand_config), position, duration, print_table(marker))
@@ -279,38 +467,30 @@ function factory ()
         -- Arpeggio up
         if hand_config.play == 1 then
             print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
-            -- Add more notes into the chord if not enough to complete notes_per_cycle
-            -- FIXME this needs rework
-            local notes_per_cycle = hand_config.pattern / ((hand_config.octave_drift + 1))
-            if #chord_notes * (hand_config.octave_drift + 1) < notes_per_cycle then
-                local x = 0
-                while #chord_notes * (hand_config.octave_drift + 1) < notes_per_cycle do
-                    local i = (x % #chord_notes) + 1
-                    table.insert(chord_notes, chord_notes[i] + 12)
-                    x = x + 1
-                end
-                -- Remember how many notes were added to the chord
-                marker.extra_notes = x
-                print("Added ", x, " extra notes")
-            end
-            if not marker.extra_notes then
-                marker.extra_notes = 0
-            end
-            -- Move to the next octave if needed
-            -- Make sure the next note goes above the highest note in the chord
-            local octave_shift = (marker.cnt // #chord_notes) % (hand_config.octave_drift + 1)
-            local note_x
-            if octave_shift == 0 then
-                note_x = ((marker.cnt) % #chord_notes) + 1
-            else
-                note_x = ((marker.cnt + marker.extra_notes) % #chord_notes) + 1
-                -- Special case when we are on the last note
-                if marker.extra_notes > 0 and note_x == 1 then
-                    octave_shift = octave_shift + 1
-                    note_x = note_x + 1
-                end
-            end
-            local note = chord_notes[note_x] + 12 * octave_shift
+
+            chord_notes = createUpArp2(chord_notes, hand_config)
+            marker.chord_notes = chord_notes
+
+            -- Select note to play
+            local note_x = marker.cnt % #chord_notes + 1
+            local note = chord_notes[note_x]
+
+            print("Playing note ", note, " at index ", note_x)
+
+            -- Add note
+            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
+        end
+
+        -- Arpeggio up/down
+        if hand_config.play == 2 then
+            print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
+
+            chord_notes = convertToUpDownArpeggio(createUpArp2(chord_notes, hand_config))
+            marker.chord_notes = chord_notes
+
+            -- Select note to play
+            local note_x = marker.cnt % #chord_notes + 1
+            local note = chord_notes[note_x]
 
             print("Playing note ", note, " at index ", note_x)
 
