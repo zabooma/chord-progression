@@ -389,6 +389,78 @@ function factory ()
         end
     end
 
+    -- Function to generate the run pattern based on time signature and octave drift
+    function createUpArp3(chordNotes, hand_config)
+        local initialCycleNotes = hand_config.pattern             -- Total number of notes
+        local initialOctaveDrift = hand_config.octave_drift       -- Initial octave drift
+        local maxOctaveDrift = hand_config.max_octave_drift or 5  -- Maximum allowable octave drift
+        local timeSignature = hand_config.time_signature          -- e.g., {4, 4} for 4/4 time
+        local durationInMeasures = hand_config.measures or 1      -- Duration of the arpeggio in measures
+
+        -- Step 1: Calculate total beats and notes per beat
+        local beatsPerMeasure = timeSignature[1]
+        local totalBeats = beatsPerMeasure * durationInMeasures
+        local notesPerBeat = initialCycleNotes / totalBeats
+
+        -- Ensure notesPerBeat is an integer
+        if notesPerBeat ~= math.floor(notesPerBeat) then
+            error("The total number of notes does not divide evenly into the total beats.")
+        end
+
+        -- Step 2: Calculate beats per run
+        local beatsPerRun = initialOctaveDrift + 1
+
+        -- Ensure beatsPerRun divides evenly into totalBeats
+        if totalBeats % beatsPerRun ~= 0 then
+            error("The total beats do not divide evenly into beats per run.")
+        end
+
+        -- Step 3: Calculate notes per run
+        local notesPerRun = notesPerBeat * beatsPerRun
+
+        -- Step 4: Extend chord notes across octaves dynamically
+        local extendedNotes = {}
+        local octaveDrift = initialOctaveDrift
+
+        while true do
+            -- Clear extendedNotes for each iteration
+            extendedNotes = {}
+
+            -- Extend chord notes up to the current octave drift
+            for i = 0, octaveDrift do
+                for _, note in ipairs(chordNotes) do
+                    table.insert(extendedNotes, note + i * 12)
+                end
+            end
+
+            -- Sort the extended notes
+            table.sort(extendedNotes)
+
+            -- Check if we have enough notes
+            if #extendedNotes >= notesPerRun or octaveDrift >= maxOctaveDrift then
+                break
+            end
+
+            -- Increase octave drift
+            octaveDrift = octaveDrift + 1
+        end
+
+        -- Ensure we have enough notes after extending
+        if #extendedNotes < notesPerRun then
+            error("Unable to extend notes sufficiently within the maximum octave drift.")
+        end
+
+        -- Generate the run pattern
+        local runPattern = {}
+        for i = 1, notesPerRun do
+            table.insert(runPattern, extendedNotes[i])
+        end
+
+        -- Return the run pattern and the number of runs needed
+        local numberOfRuns = totalBeats / beatsPerRun
+        return runPattern, numberOfRuns
+    end
+
     function convertToUpDownArpeggio(arpeggioNotes)
         local n = #arpeggioNotes
         local upDownArpeggio = {}
@@ -468,7 +540,7 @@ function factory ()
         if hand_config.play == 1 then
             print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            chord_notes = createUpArp2(chord_notes, hand_config)
+            chord_notes = createUpArp3(chord_notes, hand_config)
             marker.chord_notes = chord_notes
 
             -- Select note to play
@@ -485,7 +557,7 @@ function factory ()
         if hand_config.play == 2 then
             print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            chord_notes = convertToUpDownArpeggio(createUpArp2(chord_notes, hand_config))
+            chord_notes = convertToUpDownArpeggio(createUpArp3(chord_notes, hand_config))
             marker.chord_notes = chord_notes
 
             -- Select note to play
@@ -1075,6 +1147,8 @@ function factory ()
                 for _, hand in ipairs({ 1, 2 }) do
 
                     local hand_config = get_hand_config(hand)
+                    -- Add signature to the hand_config
+                    hand_config.time_signature = {signature:divisions_per_bar(), signature:note_value()}
 
                     -- Add all inversion change points as chords in the timeline
                     local inversion_change_markers = {}
