@@ -404,7 +404,8 @@ function factory ()
 
         -- Ensure notesPerBeat is an integer
         if notesPerBeat ~= math.floor(notesPerBeat) then
-            error("The total number of notes does not divide evenly into the total beats.")
+            print("The total number of notes does not divide evenly into the total beats.")
+            notesPerBeat = math.ceil(notesPerBeat)
         end
 
         -- Step 2: Calculate beats per run
@@ -412,7 +413,7 @@ function factory ()
 
         -- Ensure beatsPerRun divides evenly into totalBeats
         if totalBeats % beatsPerRun ~= 0 then
-            error("The total beats do not divide evenly into beats per run.")
+            print("The total beats do not divide evenly into beats per run.")
         end
 
         -- Step 3: Calculate notes per run
@@ -447,63 +448,43 @@ function factory ()
 
         -- Ensure we have enough notes after extending
         if #extendedNotes < notesPerRun then
-            error("Unable to extend notes sufficiently within the maximum octave drift.")
+            print("Unable to extend notes sufficiently within the maximum octave drift.")
         end
 
         -- Generate the run pattern
         local runPattern = {}
-        for i = 1, notesPerRun do
+        for i = 1, math.min(notesPerRun, #extendedNotes) do
             table.insert(runPattern, extendedNotes[i])
         end
 
-        -- Return the run pattern and the number of runs needed
-        local numberOfRuns = totalBeats / beatsPerRun
-        return runPattern, numberOfRuns
+        -- Return the run pattern
+        return runPattern
     end
 
-    function convertToUpDownArpeggio(arpeggioNotes)
-        local n = #arpeggioNotes
-        local upDownArpeggio = {}
-        local peakIndex
-
-        if n % 2 == 0 then
-            -- Even number of notes
-            peakIndex = n / 2
-            -- Ascending part (up to peakIndex)
-            for i = 1, peakIndex do
-                table.insert(upDownArpeggio, arpeggioNotes[i])
-            end
-            -- Descending part (from peakIndex backward)
-            for i = peakIndex, 1, -1 do
-                table.insert(upDownArpeggio, arpeggioNotes[i])
-            end
-        else
-            -- Odd number of notes
-            peakIndex = (n + 1) / 2
-            -- Ascending part (up to peakIndex)
-            for i = 1, peakIndex do
-                table.insert(upDownArpeggio, arpeggioNotes[i])
-            end
-            -- Descending part (excluding peakIndex to avoid duplication)
-            for i = peakIndex - 1, 1, -1 do
-                table.insert(upDownArpeggio, arpeggioNotes[i])
+    function generate_downward_arpeggio(up_notes)
+        -- Find the first note which, when transposed by one octave, is not already in the upward pattern
+        local first_note = nil
+        for i = 1, #up_notes do
+            local transposed_note = up_notes[i] + 12  -- Transpose up by one octave
+            if not table.contains(up_notes, transposed_note) then
+                first_note = transposed_note
+                break
             end
         end
 
-        -- Trim or extend the upDownArpeggio to match the input length
-        if #upDownArpeggio > n then
-            -- Remove extra notes from the end
-            while #upDownArpeggio > n do
-                table.remove(upDownArpeggio)
-            end
-        elseif #upDownArpeggio < n then
-            -- Append additional notes from the descending part
-            for i = 2, n - #upDownArpeggio + 1 do
-                table.insert(upDownArpeggio, arpeggioNotes[i])
-            end
+        -- If all transposed notes are in the upward arpeggio, use the last note transposed up an octave
+        if not first_note then
+            first_note = up_notes[#up_notes] + 12
         end
 
-        return upDownArpeggio
+        -- Generate the downward arpeggio starting from the first_note
+        local down_notes = {first_note}
+        -- Reverse the up_notes, excluding the first note to match the note count
+        for i = #up_notes, 2, -1 do
+            table.insert(down_notes, up_notes[i])
+        end
+
+        return down_notes
     end
 
     -- Function to add a chord at a given marker position
@@ -555,9 +536,11 @@ function factory ()
 
         -- Arpeggio up/down
         if hand_config.play == 2 then
-            print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
+            print("Play arpeggio up/down, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            chord_notes = convertToUpDownArpeggio(createUpArp3(chord_notes, hand_config))
+            chord_notes = createUpArp3(chord_notes, hand_config)
+            table.append(chord_notes, generate_downward_arpeggio(chord_notes))
+
             marker.chord_notes = chord_notes
 
             -- Select note to play
@@ -569,6 +552,45 @@ function factory ()
             -- Add note
             add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
         end
+
+        -- Arpeggio down
+        if hand_config.play == 3 then
+            print("Play arpeggio down, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
+
+            chord_notes = table.reverse(createUpArp3(chord_notes, hand_config))
+            marker.chord_notes = chord_notes
+
+            -- Select note to play
+            local note_x = marker.cnt % #chord_notes + 1
+            local note = chord_notes[note_x]
+
+            print("Playing note ", note, " at index ", note_x)
+
+            -- Add note
+            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
+        end
+
+        -- Arpeggio down/up
+        if hand_config.play == 4 then
+            print("Play arpeggio down/up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
+
+            local up_chord_notes = createUpArp3(chord_notes, hand_config)
+            local down_chord_notes = generate_downward_arpeggio(up_chord_notes)
+            chord_notes = table.reverse(up_chord_notes)
+            table.append(chord_notes, table.reverse(down_chord_notes))
+
+            marker.chord_notes = chord_notes
+
+            -- Select note to play
+            local note_x = marker.cnt % #chord_notes + 1
+            local note = chord_notes[note_x]
+
+            print("Playing note ", note, " at index ", note_x)
+
+            -- Add note
+            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
+        end
+
 
     end
 
@@ -1087,6 +1109,23 @@ function factory ()
             end
         end
         return false
+    end
+
+    -- Append t2 to t1
+    function table.append(t1, t2)
+        for i = 1, #t2 do
+            t1[#t1 + 1] = t2[i]
+        end
+        return t1
+    end
+
+    -- Define the table.reverse function
+    function table.reverse(tbl)
+        local reversed = {}
+        for i = #tbl, 1, -1 do
+            reversed[#reversed + 1] = tbl[i]
+        end
+        return reversed
     end
 
     function table.getIgnoreCase(tbl, key)
