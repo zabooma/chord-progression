@@ -234,7 +234,7 @@ function factory ()
 
     -- Function to generate the run pattern based on time signature and octave drift
     function createUpArp(chordNotes, hand_config)
-        local initialCycleNotes = hand_config.pattern             -- Total number of notes
+        local initialCycleNotes = math.abs(hand_config.pattern)   -- Total number of notes
         local initialOctaveDrift = hand_config.octave_drift       -- Initial octave drift
         local maxOctaveDrift = hand_config.max_octave_drift or 5  -- Maximum allowable octave drift
         local timeSignature = hand_config.time_signature          -- e.g., {4, 4} for 4/4 time
@@ -347,7 +347,6 @@ function factory ()
 
         -- Solid chord
         if hand_config.play == 0 then
-            print("Play solid chord")
             for _, note in ipairs(chord_notes) do
                 add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
             end
@@ -361,80 +360,15 @@ function factory ()
         end
 
         -- Arpeggio up
-        if hand_config.play == 1 then
-            print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
-
-            chord_notes = createUpArp(chord_notes, hand_config)
-            marker.chord_notes = chord_notes
-
+        if table.contains({1,2,3,4}, hand_config.play) and marker.arpeggio then
+            chord_notes = marker.arpeggio
             -- Select note to play
             local note_x = marker.cnt % #chord_notes + 1
             local note = chord_notes[note_x]
 
-            print("Playing note ", note, " at index ", note_x)
-
             -- Add note
             add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
         end
-
-        -- Arpeggio up/down
-        if hand_config.play == 2 then
-            print("Play arpeggio up/down, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
-
-            chord_notes = createUpArp(chord_notes, hand_config)
-            table.append(chord_notes, generate_downward_arpeggio(chord_notes))
-
-            marker.chord_notes = chord_notes
-
-            -- Select note to play
-            local note_x = marker.cnt % #chord_notes + 1
-            local note = chord_notes[note_x]
-
-            print("Playing note ", note, " at index ", note_x)
-
-            -- Add note
-            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
-        end
-
-        -- Arpeggio down
-        if hand_config.play == 3 then
-            print("Play arpeggio down, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
-
-            chord_notes = table.reverse(createUpArp(chord_notes, hand_config))
-            marker.chord_notes = chord_notes
-
-            -- Select note to play
-            local note_x = marker.cnt % #chord_notes + 1
-            local note = chord_notes[note_x]
-
-            print("Playing note ", note, " at index ", note_x)
-
-            -- Add note
-            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
-        end
-
-        -- Arpeggio down/up
-        if hand_config.play == 4 then
-            print("Play arpeggio down/up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
-
-            local up_chord_notes = createUpArp(chord_notes, hand_config)
-            local down_chord_notes = generate_downward_arpeggio(up_chord_notes)
-            chord_notes = table.reverse(up_chord_notes)
-            table.append(chord_notes, table.reverse(down_chord_notes))
-
-            marker.chord_notes = chord_notes
-
-            -- Select note to play
-            local note_x = marker.cnt % #chord_notes + 1
-            local note = chord_notes[note_x]
-
-            print("Playing note ", note, " at index ", note_x)
-
-            -- Add note
-            add_midi_note_to_region(midiCommand, note, position, duration, channel, velocity)
-        end
-
-
     end
 
     function add_midi_note_to_region(midiCommand, note_pitch, start_time, duration, channel, velocity)
@@ -450,6 +384,38 @@ function factory ()
                 velocity    -- Velocity
         )
         midiCommand:add(new_note)
+    end
+
+    function createArpeggios(chord_notes, hand_config)
+
+        local arpeggioNotes = {}
+
+        -- Arpeggio up
+        if hand_config.play == 1 then
+            arpeggioNotes = createUpArp(chord_notes, hand_config)
+        end
+
+        -- Arpeggio up/down
+        if hand_config.play == 2 then
+            arpeggioNotes = createUpArp(chord_notes, hand_config)
+            table.append(arpeggioNotes, generate_downward_arpeggio(arpeggioNotes))
+        end
+
+        -- Arpeggio down
+        if hand_config.play == 3 then
+            arpeggioNotes = table.reverse(createUpArp(chord_notes, hand_config))
+        end
+
+        -- Arpeggio down/up
+        if hand_config.play == 4 then
+            local up_chord_notes = createUpArp(chord_notes, hand_config)
+            local down_chord_notes = generate_downward_arpeggio(up_chord_notes)
+            arpeggioNotes = table.reverse(up_chord_notes)
+            table.append(arpeggioNotes, table.reverse(down_chord_notes))
+        end
+
+        return arpeggioNotes
+
     end
 
     function parse_chord_progression_config(str)
@@ -586,6 +552,7 @@ function factory ()
         local previous_inversion = nil
         local previous_octave_adjustment = nil
         local previous_chord_notes = {}
+        local previous_arpeggio = {}
 
         for i, marker in ipairs(chord_markers) do
 
@@ -611,13 +578,17 @@ function factory ()
                     -- This is a chord repeat, use the same inversion and octave adjustment as the previous chord
                     inversion, octave_adjustment, chord_notes = previous_inversion, previous_octave_adjustment, previous_chord_notes
                     -- Copy extra info from the previous chord
-                    marker.extra_notes = chord_markers[i-1].extra_notes
+                    marker.arpeggio = previous_arpeggio
                 else
                     print("Calling inversion algorithm ", hand_config.inversion_alg, " with parameters ", chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, print_table(previous_chord_notes), print_table(hand_config))
                     local choose_inversion = inversion_algorithms[hand_config.inversion_alg]
                     inversion, octave_adjustment, chord_notes =
                         choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config)
                     print("Inversion algorithm returned ", inversion, octave_adjustment, print_table(chord_notes))
+                    -- Create arpeggio if needed
+                    if table.contains({1,2,3,4}, hand_config.play) then
+                        marker.arpeggio = createArpeggios(chord_notes, hand_config)
+                    end
                 end
 
                 -- Add generated chord notes to the marker object
@@ -638,6 +609,7 @@ function factory ()
                 -- Save current chord string and notes for the next iteration
                 previous_chord_str = chord_str
                 previous_chord_notes = chord_notes
+                previous_arpeggio = marker.arpeggio
 
             end
 
