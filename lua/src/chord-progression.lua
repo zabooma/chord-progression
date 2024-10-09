@@ -586,7 +586,7 @@ function factory ()
                         choose_inversion(chord_str, previous_inversion, previous_chord_str, previous_octave_adjustment, previous_chord_notes, hand_config)
                     print("Inversion algorithm returned ", inversion, octave_adjustment, print_table(chord_notes))
                     -- Create arpeggio if needed
-                    if table.contains({1,2,3,4}, hand_config.play) then
+                    if table.contains({1,2,3,4}, hand_config.play) and hand_config.pattern ~= 0 then
                         marker.arpeggio = createArpeggios(chord_notes, hand_config)
                     end
                 end
