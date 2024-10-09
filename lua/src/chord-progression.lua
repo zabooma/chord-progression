@@ -204,20 +204,6 @@ function factory ()
         return chord_notes
     end
 
-    -- Function to evaluate how well two chords blend by comparing notes
-    function evaluate_inversion_blending(prev_notes, current_notes)
-        table.sort(prev_notes)
-        table.sort(current_notes)
-
-        -- Calculate total difference between corresponding notes
-        local total_difference = 0
-        for i = 1, math.min(#prev_notes, #current_notes) do
-            total_difference = total_difference + math.abs(prev_notes[i] - current_notes[i])
-        end
-
-        return total_difference
-    end
-
     -- Function to parse the chord string into key and chord type
     function parse_chord(chord_str)
         local key = chord_str:sub(1, 1)
@@ -246,151 +232,8 @@ function factory ()
         return key, chord_type
     end
 
-    -- Create simple UP arpeggio
-    function createUpArp1(chord_notes, hand_config)
-        local notes_per_cycle = hand_config.pattern / (hand_config.octave_drift + 1)
-        if #chord_notes < notes_per_cycle then
-            local x = 0
-            while #chord_notes < notes_per_cycle do
-                local i = (x % #chord_notes) + 1
-                table.insert(chord_notes, chord_notes[i] + 12)
-                x = x + 1
-            end
-            print("Added ", x, " extra notes")
-        end
-        return chord_notes;
-    end
-
-    -- Function to extend notes based on the octave drift
-    function extendNotes(notes, octaves)
-        table.sort(notes)
-        local extended = {}
-        for octave = 0, octaves do
-            for _, note in ipairs(notes) do
-                local shiftedNote = note + octave * 12
-                if #extended == 0 or shiftedNote > extended[#extended] then
-                    table.insert(extended, shiftedNote)
-                end
-            end
-        end
-        return extended
-    end
-
-    -- Modified createUpArp2 function
-    function createUpArp2(chordNotes, hand_config)
-        local cycleNotes = hand_config.pattern
-        local maxOctaveDrift = hand_config.octave_drift
-        local acceptableOctaveDriftIncrease = hand_config.acceptable_octave_drift_increase or 1
-
-        -- Function to get factors of a number in decreasing order
-        local function getFactors(n)
-            local factors = {}
-            for i = 1, n do
-                if n % i == 0 then
-                    table.insert(factors, i)
-                end
-            end
-            table.sort(factors, function(a, b) return a > b end)
-            return factors
-        end
-
-        local factors = getFactors(cycleNotes)
-        local candidatePatterns = {}
-
-        for _, length in ipairs(factors) do
-            local minNotesNeeded = length
-
-            -- Start with the current octave drift
-            local requiredOctaveDrift = maxOctaveDrift
-            local extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
-
-            -- Extend octave drift only as much as needed
-            while #extendedNotes < minNotesNeeded and (requiredOctaveDrift - maxOctaveDrift) <= acceptableOctaveDriftIncrease do
-                requiredOctaveDrift = requiredOctaveDrift + 1
-                extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
-            end
-
-            local octaveDriftIncrease = requiredOctaveDrift - maxOctaveDrift
-
-            -- Only consider patterns with acceptable octave drift increase
-            if #extendedNotes >= minNotesNeeded and octaveDriftIncrease <= acceptableOctaveDriftIncrease then
-                table.insert(candidatePatterns, {
-                    patternLength = length,
-                    requiredOctaveDrift = requiredOctaveDrift,
-                    octaveDriftIncrease = octaveDriftIncrease,
-                    extendedNotes = extendedNotes
-                })
-            end
-        end
-
-        -- If no suitable pattern is found, use the maximum available notes within acceptable octave drift
-        if #candidatePatterns == 0 then
-            local requiredOctaveDrift = maxOctaveDrift
-            local extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
-
-            -- Extend octave drift within acceptable limits to get as many notes as possible
-            while (requiredOctaveDrift - maxOctaveDrift) <= acceptableOctaveDriftIncrease do
-                requiredOctaveDrift = requiredOctaveDrift + 1
-                extendedNotes = extendNotes(chordNotes, requiredOctaveDrift)
-            end
-
-            -- Use all available extended notes to create a pattern
-            local pattern = {}
-            for i = 1, math.min(cycleNotes, #extendedNotes) do
-                table.insert(pattern, extendedNotes[i])
-            end
-
-            -- Repeat the pattern as necessary
-            local arpeggioNotes = {}
-            local repeats = math.floor(cycleNotes / #pattern)
-            local remainingNotes = cycleNotes % #pattern
-
-            for i = 1, repeats do
-                for j = 1, #pattern do
-                    table.insert(arpeggioNotes, pattern[j])
-                end
-            end
-            for i = 1, remainingNotes do
-                table.insert(arpeggioNotes, pattern[i])
-            end
-
-            return arpeggioNotes
-        else
-            -- Sort candidate patterns by pattern length (descending), then octave drift increase (ascending)
-            table.sort(candidatePatterns, function(a, b)
-                if a.patternLength ~= b.patternLength then
-                    return a.patternLength > b.patternLength
-                else
-                    return a.octaveDriftIncrease < b.octaveDriftIncrease
-                end
-            end)
-
-            local bestPattern = candidatePatterns[1]
-            local patternLength = bestPattern.patternLength
-            local requiredOctaveDrift = bestPattern.requiredOctaveDrift
-            local extendedNotes = bestPattern.extendedNotes
-
-            -- Create the pattern
-            local pattern = {}
-            for i = 1, patternLength do
-                table.insert(pattern, extendedNotes[i])
-            end
-
-            -- Generate the arpeggio notes by repeating the pattern
-            local repeats = cycleNotes / patternLength
-            local arpeggioNotes = {}
-            for i = 1, repeats do
-                for j = 1, patternLength do
-                    table.insert(arpeggioNotes, pattern[j])
-                end
-            end
-
-            return arpeggioNotes
-        end
-    end
-
     -- Function to generate the run pattern based on time signature and octave drift
-    function createUpArp3(chordNotes, hand_config)
+    function createUpArp(chordNotes, hand_config)
         local initialCycleNotes = hand_config.pattern             -- Total number of notes
         local initialOctaveDrift = hand_config.octave_drift       -- Initial octave drift
         local maxOctaveDrift = hand_config.max_octave_drift or 5  -- Maximum allowable octave drift
@@ -521,7 +364,7 @@ function factory ()
         if hand_config.play == 1 then
             print("Play arpeggio up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            chord_notes = createUpArp3(chord_notes, hand_config)
+            chord_notes = createUpArp(chord_notes, hand_config)
             marker.chord_notes = chord_notes
 
             -- Select note to play
@@ -538,7 +381,7 @@ function factory ()
         if hand_config.play == 2 then
             print("Play arpeggio up/down, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            chord_notes = createUpArp3(chord_notes, hand_config)
+            chord_notes = createUpArp(chord_notes, hand_config)
             table.append(chord_notes, generate_downward_arpeggio(chord_notes))
 
             marker.chord_notes = chord_notes
@@ -557,7 +400,7 @@ function factory ()
         if hand_config.play == 3 then
             print("Play arpeggio down, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            chord_notes = table.reverse(createUpArp3(chord_notes, hand_config))
+            chord_notes = table.reverse(createUpArp(chord_notes, hand_config))
             marker.chord_notes = chord_notes
 
             -- Select note to play
@@ -574,7 +417,7 @@ function factory ()
         if hand_config.play == 4 then
             print("Play arpeggio down/up, marker.cnt ", marker.cnt, " chord_notes ", print_table(chord_notes))
 
-            local up_chord_notes = createUpArp3(chord_notes, hand_config)
+            local up_chord_notes = createUpArp(chord_notes, hand_config)
             local down_chord_notes = generate_downward_arpeggio(up_chord_notes)
             chord_notes = table.reverse(up_chord_notes)
             table.append(chord_notes, table.reverse(down_chord_notes))
