@@ -1039,7 +1039,7 @@ function factory ()
                             -- Interval calculation for the chord repeats
                             chord_pattern_interval = num_beats_per_bar / math.abs(hand_config.pattern)
                             chord_pattern_interval_beats = math.floor(chord_pattern_interval)
-                            chord_pattern_interval_ticks = math.tointeger((chord_pattern_interval - chord_pattern_interval_beats) * ticks_per_beat)
+                            chord_pattern_interval_ticks = math.tointeger(math.floor((chord_pattern_interval - chord_pattern_interval_beats) * ticks_per_beat))
                             print("Chord pattern interval ",  chord_pattern_interval, " = ",  chord_pattern_interval_beats, ":",  chord_pattern_interval_ticks, " beats")
 
                             local marker_time
@@ -1054,7 +1054,7 @@ function factory ()
                                 local marker_start_at_beat = marker:start():beats():get_beats()
                                 local bar_start_at_beat = math.floor(marker_start_at_beat / num_beats_per_bar) * num_beats_per_bar
                                 marker_time = Temporal.Beats(bar_start_at_beat, 0)
-                                -- Make sure next marker is after the first marker
+                                -- Make sure next marker is after the first markerUnsupported type
                                 while marker_time <= first_marker_time do
                                     marker_time = marker_time + Temporal.Beats(interval_beats, interval_ticks)
                                 end
