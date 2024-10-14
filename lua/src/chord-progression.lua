@@ -972,6 +972,29 @@ function factory ()
 
     end
 
+    function split_key_index(str)
+        local key = str:match("(%D+)")  -- Match one or more non-digit characters
+        local index = tonumber(str:match("(%d+)$"))  -- Match one or more digits at the end of the string
+        return key, index
+    end
+
+    function format_key_values(key_values)
+        local result = {}
+        for key, values in pairs(key_values) do
+            local formattedValues = {}
+            for i, value in ipairs(values) do
+                if type(value) == "number" then
+                    formattedValues[i] = tostring(math.floor(value))
+                else
+                    formattedValues[i] = tostring(value)
+                end
+            end
+            local valueStr = table.concat(formattedValues, ",")
+            table.insert(result, key .. "(" .. valueStr .. ")")
+        end
+        return table.concat(result, " ")
+    end
+
     function config_cp_region(cp_region)
 
         -- Parse configuration options
@@ -1019,28 +1042,65 @@ function factory ()
             local hand_config = get_hand_config(hand)
 
             if hand == 2 then
-                table.insert(dialog_options, {type = "label", title = "__________________________________________________________"})
+                table.insert(dialog_options, {type = "label", title = " "})
+                table.insert(dialog_options, {type = "label", title = "__________________________________________________" .. hands[hand] .. " hand"})
+            else
+                table.insert(dialog_options, {type = "label", title = hands[hand] .. " hand__________________________________________________"})
             end
 
-            table.insert(dialog_options, {type = "label", title = hands[hand] .. " hand                                          "})
-            table.insert(dialog_options, {type = "number", key = "octave"..tostring(hand), title = "Octave", min = 0, max = 8, default = hand_config.octave})
-            table.insert(dialog_options, {type = "number", key = "hand_span"..tostring(hand), title = "Hand span", min = 0, max = 12, default = hand_config.hand_span})
-            table.insert(dialog_options, {type = "number", key = "notes_per_hand"..tostring(hand), title = "Notes per hand", min = 0, max = 12, default = hand_config.notes_per_hand})
-            table.insert(dialog_options, {type = "number", key = "inversions_per_bar"..tostring(hand), title = "Inversions per bar", min = 0, max = 16, default = hand_config.inversions_per_bar})
-            table.insert(dialog_options, {type = "number", key = "channel"..tostring(hand), title = "Channel", min = 0, max = 15, default = hand_config.channel})
-            table.insert(dialog_options, {type = "slider", key = "velocity"..tostring(hand), title = "Velocity", min = 0, max = 127, default = hand_config.velocity})
-            table.insert(dialog_options, {type = "slider", key = "note_gap"..tostring(hand), title = "Note gap", min = 0, max = 120, default = hand_config.note_gap})
-            table.insert(dialog_options, {type = "number", key = "pattern"..tostring(hand), title = "Pattern", min = 0, max = 64, default = math.abs(hand_config.pattern)})
+            table.insert(dialog_options, {type = "number", key = "octave"..tostring(hand), title = "Octave", min = 0, max = 8, default = hand_config.octave, step = 1})
+            table.insert(dialog_options, {type = "number", key = "hand_span"..tostring(hand), title = "Hand span", min = 0, max = 12, default = hand_config.hand_span, step = 1})
+            table.insert(dialog_options, {type = "number", key = "notes_per_hand"..tostring(hand), title = "Notes per hand", min = 0, max = 12, default = hand_config.notes_per_hand, step = 1})
+            table.insert(dialog_options, {type = "number", key = "inversions_per_bar"..tostring(hand), title = "Inversions per bar", min = 0, max = 16, default = hand_config.inversions_per_bar, step = 1})
+            table.insert(dialog_options, {type = "number", key = "channel"..tostring(hand), title = "Channel", min = 0, max = 15, default = hand_config.channel, step = 1})
+            table.insert(dialog_options, {type = "slider", key = "velocity"..tostring(hand), title = "Velocity", min = 0, max = 127, default = hand_config.velocity, step = 1})
+            table.insert(dialog_options, {type = "slider", key = "note_gap"..tostring(hand), title = "Note gap", min = 0, max = 120, default = hand_config.note_gap, step = 1})
+            table.insert(dialog_options, {type = "number", key = "pattern"..tostring(hand), title = "Pattern", min = 0, max = 64, default = math.abs(hand_config.pattern), step = 1})
             table.insert(dialog_options, {type = "checkbox", key = "swing"..tostring(hand), title = "Swing", default = (hand_config.pattern < 0)})
-            table.insert(dialog_options, {type = "number", key = "octave_drift"..tostring(hand), title = "Octave drift", min = 0, max = 4, default = hand_config.octave_drift})
+            table.insert(dialog_options, {type = "number", key = "octave_drift"..tostring(hand), title = "Octave drift", min = 0, max = 4, default = hand_config.octave_drift, step = 1})
             table.insert(dialog_options, {type = "dropdown", key = "play"..tostring(hand), title = "Play", values = play_values, default = play_values_x[hand_config.play]})
 
         end
         -- Open config dialog for the selected region
         local dialog = LuaDialog.Dialog("Chord progression settings", dialog_options)
         local response = dialog:run()
+        dialog = nil
 
-        return true
+        if response then
+
+            -- Adjustments
+            if response.swing1 then
+                response.pattern1 = -1 * response.pattern1
+            end
+            if response.swing2 then
+                response.pattern2 = -1 * response.pattern2
+            end
+
+            -- Generate setup string
+
+            local key_values = {}
+            print("Dialog response ", print_table(response))
+            for dialog_key, value in pairs(response) do
+                local key, index = split_key_index(dialog_key)
+                if not key_values[key] then
+                    key_values[key] = {}
+                end
+                key_values[key][index] = value
+            end
+
+            --print("Found these settings ", print_table(key_values))
+            local setup_str = "#ChordProgression " .. format_key_values(key_values)
+            --print("Setup string ", setup_str)
+
+            -- Update region's name with the new setup string
+            cp_region:set_name(setup_str)
+
+            return true
+
+        else
+            return false
+        end
+
     end
 
     return function()
@@ -1052,6 +1112,14 @@ function factory ()
 
         -- Get all chord markers in the session
         local chordMarkers = getAllChordMarkers()
+
+        if #cp_regions == 0 then
+            LuaDialog.Message ("Chord progression",
+                    "Please select at least one #ChordProgression MIDI region",
+                    LuaDialog.MessageType.Error,
+                    LuaDialog.ButtonType.Close):run ()
+            return
+        end
 
         if #cp_regions == 1 then
             -- Only one CP region selected, open config dialog
