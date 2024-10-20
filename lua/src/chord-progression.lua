@@ -67,8 +67,6 @@ function factory ()
             return chordMarkers
         end
 
-        -- Converted code
-
         -- Lua version of note_map for MIDI note numbers
         note_map = {
             ['C'] = 60, ['C#'] = 61, ['Db'] = 61, ['D'] = 62, ['D#'] = 63, ['Eb'] = 63, ['E'] = 64,
@@ -481,26 +479,6 @@ function factory ()
                 play = get_config_values("play", _play)[hand],
             }
         end
-
-        -- Globals
-        _hand_octave = { 3, 5 }
-        _max_hand_span = { 13, 13 }
-        _max_notes_per_hand = { 3, 4 }
-        _inversions_per_bar = { 0, 0 } -- One inversion per chord change
-        _hand_channel = {0,0} -- Both hands go to the same channel
-        _velocity = {64, 64}
-        _note_gap = {0, 0}
-        _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
-        _inversion_algorithm = {1, 1}
-        _style = {"jazz", "jazz"}
-        _octave_drift = {1, 1}
-        _play = {0, 0}
-
-        ticks_per_beat = 1920.0
-
-        inversion_algorithms = {
-            choose_inversion_2
-        }
 
         function align_to_bar(position, num_beats_per_bar)
             -- Start with the beginning of the bar (markers before the first chord marker will be skipped later)
@@ -1019,26 +997,17 @@ function factory ()
                 [9] = "Random"
             }
 
+            local style_values = {
+                ["jazz"] = "jazz",
+                ["pop"] = "pop",
+                ["classical"] = "classical"
+            }
+
             local hands = {"Left", "Right"}
 
             local dialog_options = {}
 
             for _, hand in ipairs({ 1, 2 }) do
-
-                local a = {
-                    octave = get_config_values("octave", _hand_octave)[hand],
-                    hand_span = get_config_values("hand_span", _max_hand_span)[hand],
-                    notes_per_hand = get_config_values("notes_per_hand", _max_notes_per_hand)[hand],
-                    inversions_per_bar = get_config_values("inversions_per_bar", _inversions_per_bar)[hand],
-                    channel = get_config_values("channel", _hand_channel)[hand],
-                    velocity = get_config_values("velocity", _velocity)[hand],
-                    note_gap = get_config_values("note_gap", _note_gap)[hand],
-                    pattern = get_config_values("pattern", _pattern)[hand],
-                    inversion_alg = get_config_values("inversion_alg", _inversion_algorithm)[hand],
-                    style = get_config_values("style", _style)[hand],
-                    octave_drift = get_config_values("octave_drift", _octave_drift)[hand],
-                    play = get_config_values("play", _play)[hand],
-                }
 
                 local hand_config = get_hand_config(hand)
 
@@ -1060,6 +1029,7 @@ function factory ()
                 table.insert(dialog_options, {type = "checkbox", key = "swing"..tostring(hand), title = "Swing", default = (hand_config.pattern < 0)})
                 table.insert(dialog_options, {type = "number", key = "octave_drift"..tostring(hand), title = "Octave drift", min = 0, max = 4, default = hand_config.octave_drift, step = 1})
                 table.insert(dialog_options, {type = "dropdown", key = "play"..tostring(hand), title = "Play", values = play_values, default = play_values_x[hand_config.play]})
+                table.insert(dialog_options, {type = "dropdown", key = "style"..tostring(hand), title = "Style", values = style_values, default = style_values[hand_config.style]})
 
             end
             -- Open config dialog for the selected region
@@ -1101,8 +1071,28 @@ function factory ()
             else
                 return false
             end
-
         end
+
+        -- Globals
+
+        _hand_octave = { 3, 5 }
+        _max_hand_span = { 13, 13 }
+        _max_notes_per_hand = { 3, 4 }
+        _inversions_per_bar = { 0, 0 } -- One inversion per chord change
+        _hand_channel = {0,0} -- Both hands go to the same channel
+        _velocity = {64, 64}
+        _note_gap = {0, 0}
+        _pattern = {0, 0} --chord repeat pattern. Negative value for swing notes
+        _inversion_algorithm = {1, 1}
+        _style = {"jazz", "jazz"}
+        _octave_drift = {1, 1}
+        _play = {0, 0}
+
+        ticks_per_beat = 1920.0
+
+        inversion_algorithms = {
+            choose_inversion_2
+        }
 
         -- Main code block
 
