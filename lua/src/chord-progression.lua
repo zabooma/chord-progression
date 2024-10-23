@@ -1017,7 +1017,7 @@ function factory ()
 
                 if hand == 2 then
                     table.insert(dialog_options, {type = "label", title = " "})
-                    table.insert(dialog_options, {type = "label", title = "__________________________________________________" .. hands[hand] .. " hand"})
+                    table.insert(dialog_options, {type = "heading", title = "__________________________________________________" .. hands[hand] .. " hand"})
                 else
                     table.insert(dialog_options, {type = "label", title = hands[hand] .. " hand__________________________________________________"})
                 end
