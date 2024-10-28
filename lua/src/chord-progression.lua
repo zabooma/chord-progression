@@ -1014,28 +1014,35 @@ function factory ()
             for _, hand in ipairs({ 1, 2 }) do
 
                 local hand_config = get_hand_config(hand)
-
+                local col
                 if hand == 2 then
-                    table.insert(dialog_options, {type = "label", title = " "})
-                    table.insert(dialog_options, {type = "heading", title = "__________________________________________________" .. hands[hand] .. " hand"})
+                    --table.insert(dialog_options, {type = "label", title = " "})
+                    col = 2
+                    table.insert(dialog_options, {sort = "01", col = col, type = "heading", title = "________________________________________" .. hands[hand] .. " hand"})
                 else
-                    table.insert(dialog_options, {type = "label", title = hands[hand] .. " hand__________________________________________________"})
+                    col = 0
+                    table.insert(dialog_options, {sort = "01", col = col, type = "label", title = hands[hand] .. " hand________________________________________"})
                 end
 
-                table.insert(dialog_options, {type = "number", key = "octave"..tostring(hand), title = "Octave", min = 0, max = 8, default = hand_config.octave, step = 1})
-                table.insert(dialog_options, {type = "number", key = "hand_span"..tostring(hand), title = "Hand span", min = 0, max = 12, default = hand_config.hand_span, step = 1})
-                table.insert(dialog_options, {type = "number", key = "notes_per_hand"..tostring(hand), title = "Notes per hand", min = 0, max = 12, default = hand_config.notes_per_hand, step = 1})
-                table.insert(dialog_options, {type = "number", key = "inversions_per_bar"..tostring(hand), title = "Inversions per bar", min = 0, max = 16, default = hand_config.inversions_per_bar, step = 1})
-                table.insert(dialog_options, {type = "number", key = "channel"..tostring(hand), title = "Channel", min = 0, max = 15, default = hand_config.channel, step = 1})
-                table.insert(dialog_options, {type = "slider", key = "velocity"..tostring(hand), title = "Velocity", min = 0, max = 127, default = hand_config.velocity, step = 1})
-                table.insert(dialog_options, {type = "slider", key = "note_gap"..tostring(hand), title = "Note gap", min = 0, max = 120, default = hand_config.note_gap, step = 1})
-                table.insert(dialog_options, {type = "number", key = "pattern"..tostring(hand), title = "Pattern", min = 0, max = 64, default = math.abs(hand_config.pattern), step = 1})
-                table.insert(dialog_options, {type = "checkbox", key = "swing"..tostring(hand), title = "Swing", default = (hand_config.pattern < 0)})
-                table.insert(dialog_options, {type = "number", key = "octave_drift"..tostring(hand), title = "Octave drift", min = 0, max = 4, default = hand_config.octave_drift, step = 1})
-                table.insert(dialog_options, {type = "dropdown", key = "play"..tostring(hand), title = "Play", values = play_values, default = play_values_x[hand_config.play]})
-                table.insert(dialog_options, {type = "dropdown", key = "style"..tostring(hand), title = "Style", values = style_values, default = style_values[hand_config.style]})
+                table.insert(dialog_options, {sort = "02", col = col, type = "number", key = "octave"..tostring(hand), title = "Octave", min = 0, max = 8, default = hand_config.octave, step = 1})
+                table.insert(dialog_options, {sort = "03", col = col, type = "number", key = "hand_span"..tostring(hand), title = "Hand span", min = 0, max = 12, default = hand_config.hand_span, step = 1})
+                table.insert(dialog_options, {sort = "04", col = col, type = "number", key = "notes_per_hand"..tostring(hand), title = "Notes per hand", min = 0, max = 12, default = hand_config.notes_per_hand, step = 1})
+                table.insert(dialog_options, {sort = "05", col = col, type = "number", key = "inversions_per_bar"..tostring(hand), title = "Inversions per bar", min = 0, max = 16, default = hand_config.inversions_per_bar, step = 1})
+                table.insert(dialog_options, {sort = "06", col = col, type = "number", key = "channel"..tostring(hand), title = "Channel", min = 0, max = 15, default = hand_config.channel, step = 1})
+                table.insert(dialog_options, {sort = "07", col = col, type = "slider", key = "velocity"..tostring(hand), title = "Velocity", min = 0, max = 127, default = hand_config.velocity, step = 1})
+                table.insert(dialog_options, {sort = "08", col = col, type = "slider", key = "note_gap"..tostring(hand), title = "Note gap", min = 0, max = 120, default = hand_config.note_gap, step = 1})
+                table.insert(dialog_options, {sort = "09", col = col, type = "number", key = "pattern"..tostring(hand), title = "Pattern", min = 0, max = 64, default = math.abs(hand_config.pattern), step = 1})
+                table.insert(dialog_options, {sort = "10", col = col+1, type = "checkbox", key = "swing"..tostring(hand), title = "Swing", default = (hand_config.pattern < 0)})
+                table.insert(dialog_options, {sort = "11", col = col, type = "number", key = "octave_drift"..tostring(hand), title = "Octave drift", min = 0, max = 4, default = hand_config.octave_drift, step = 1})
+                table.insert(dialog_options, {sort = "12", col = col, type = "dropdown", key = "play"..tostring(hand), title = "Play", values = play_values, default = play_values_x[hand_config.play]})
+                table.insert(dialog_options, {sort = "13", col = col, type = "dropdown", key = "style"..tostring(hand), title = "Style", values = style_values, default = style_values[hand_config.style]})
 
             end
+            -- Sort dialog options so that columns come side by side
+            table.sort(dialog_options, function(a, b)
+                return a.sort .. tostring(a.col) < b.sort .. tostring(b.col)
+            end)
+
             -- Open config dialog for the selected region
             local dialog = LuaDialog.Dialog("Chord progression settings", dialog_options)
             local response = dialog:run()
